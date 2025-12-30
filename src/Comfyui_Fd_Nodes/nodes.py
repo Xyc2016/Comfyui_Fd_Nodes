@@ -1,4 +1,148 @@
+import io
+import os
 from inspect import cleandoc
+from typing import Any, Dict, Tuple
+
+import numpy as np
+import requests
+import torch
+from PIL import Image
+from uuid import uuid4
+
+FD_REMOVE_WATERMARK_SERVICE_URL = os.getenv("FD_REMOVE_WATERMARK_SERVICE_URL", "http://localhost:8000/v1/process")
+
+
+class FD_RemoveWatermark:
+    """
+    Remove watermark from image using AI inpainting service
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls) -> Dict[str, Any]:
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "service_url": ("STRING", {"default": FD_REMOVE_WATERMARK_SERVICE_URL, "multiline": False}),
+                "text_prompt": (
+                    "STRING",
+                    {"default": "sticker. label. badge. corner tag. overlay logo.", "multiline": True},
+                ),
+                "threshold": (
+                    "FLOAT",
+                    {
+                        "default": 0.30,
+                    },
+                ),
+                "text_threshold": (
+                    "FLOAT",
+                    {
+                        "default": 0.25,
+                    },
+                ),
+                "max_side": (
+                    "INT",
+                    {
+                        "default": 3000,
+                    },
+                ),
+                "mask_dilate_ksize": (
+                    "INT",
+                    {
+                        "default": 5,
+                    },
+                ),
+                "mask_dilate_iters": (
+                    "INT",
+                    {
+                        "default": 1,
+                    },
+                ),
+                "jpeg_quality": (
+                    "INT",
+                    {
+                        "default": 95,
+                    },
+                ),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "remove_watermark"
+    CATEGORY = "image/postprocessing"
+
+    def remove_watermark(
+        self,
+        image: torch.Tensor,
+        service_url: str,
+        text_prompt: str,
+        threshold: float,
+        text_threshold: float,
+        max_side: int,
+        mask_dilate_ksize: int,
+        mask_dilate_iters: int,
+        jpeg_quality: int,
+    ) -> Tuple[torch.Tensor]:
+        call_id = str(uuid4())[:8]
+        print(
+            f"FD_RemoveWatermark [{call_id}] Start processing. ",
+            {
+                "call_id": call_id,
+                "image_shape": list(image.shape),
+                "service_url": service_url,
+                "text_prompt": text_prompt,
+                "threshold": threshold,
+                "text_threshold": text_threshold,
+                "max_side": max_side,
+                "mask_dilate_ksize": mask_dilate_ksize,
+                "mask_dilate_iters": mask_dilate_iters,
+                "jpeg_quality": jpeg_quality,
+            },
+        )
+        try:
+            # Convert ComfyUI tensor to PIL Image (only process first image in batch)
+            img_tensor = image[0]  # [H, W, C] in range [0, 1]
+            img_np = (img_tensor.cpu().numpy() * 255).astype(np.uint8)
+            pil_img = Image.fromarray(img_np)
+
+            # Convert to bytes
+            img_bytes = io.BytesIO()
+            pil_img.save(img_bytes, format="PNG")
+            img_bytes.seek(0)
+
+            # Prepare request
+            files = {"image": ("image.png", img_bytes, "image/png")}
+            data = {
+                "text_prompt": text_prompt,
+                "threshold": threshold,
+                "text_threshold": text_threshold,
+                "max_side": max_side,
+                "mask_dilate_ksize": mask_dilate_ksize,
+                "mask_dilate_iters": mask_dilate_iters,
+                "inpaint_method": "lama",
+                "enable_quality_check": True,
+                "fallback_to_original": True,
+                "jpeg_quality": jpeg_quality,
+            }
+
+            print(f"FD_RemoveWatermark [{call_id}] Calling service at {service_url} ...")
+            # Call service
+            response = requests.post(service_url, files=files, data=data, timeout=60)
+            response.raise_for_status()
+
+            # Convert response back to ComfyUI tensor
+            result_img = Image.open(io.BytesIO(response.content)).convert("RGB")
+            result_np = np.array(result_img).astype(np.float32) / 255.0
+            result_tensor = torch.from_numpy(result_np).unsqueeze(0)  # [1, H, W, C]
+
+            print(f"FD_RemoveWatermark [{call_id}] Successfully processed image.")
+            return (result_tensor,)
+
+        except Exception as e:
+            # Return original image on any error
+            print(f"FD_RemoveWatermark [{call_id}] error: {e}, returning original image")
+            return (image,)
+
+
 class Example:
     """
     A example node
