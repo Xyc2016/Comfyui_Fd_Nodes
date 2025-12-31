@@ -2,12 +2,12 @@ import io
 import os
 from inspect import cleandoc
 from typing import Any, Dict, Tuple
+from uuid import uuid4
 
 import numpy as np
 import requests
 import torch
 from PIL import Image
-from uuid import uuid4
 
 FD_REMOVE_WATERMARK_SERVICE_URL = os.getenv("FD_REMOVE_WATERMARK_SERVICE_URL", "http://localhost:8000/v1/process")
 
@@ -57,6 +57,9 @@ class FD_RemoveWatermark:
                         "default": 1,
                     },
                 ),
+                "inpaint_method": (["lama"],),
+                "enable_quality_check": ("BOOLEAN", {"default": True}),
+                "fallback_to_original": ("BOOLEAN", {"default": True}),
                 "jpeg_quality": (
                     "INT",
                     {
@@ -80,6 +83,9 @@ class FD_RemoveWatermark:
         max_side: int,
         mask_dilate_ksize: int,
         mask_dilate_iters: int,
+        inpaint_method: str,
+        enable_quality_check: bool,
+        fallback_to_original: bool,
         jpeg_quality: int,
     ) -> Tuple[torch.Tensor]:
         call_id = str(uuid4())[:8]
@@ -95,6 +101,9 @@ class FD_RemoveWatermark:
                 "max_side": max_side,
                 "mask_dilate_ksize": mask_dilate_ksize,
                 "mask_dilate_iters": mask_dilate_iters,
+                "inpaint_method": inpaint_method,
+                "enable_quality_check": enable_quality_check,
+                "fallback_to_original": fallback_to_original,
                 "jpeg_quality": jpeg_quality,
             },
         )
@@ -118,9 +127,9 @@ class FD_RemoveWatermark:
                 "max_side": max_side,
                 "mask_dilate_ksize": mask_dilate_ksize,
                 "mask_dilate_iters": mask_dilate_iters,
-                "inpaint_method": "lama",
-                "enable_quality_check": True,
-                "fallback_to_original": True,
+                "inpaint_method": inpaint_method,
+                "enable_quality_check": enable_quality_check,
+                "fallback_to_original": fallback_to_original,
                 "jpeg_quality": jpeg_quality,
             }
 
