@@ -25,18 +25,18 @@ class FD_RemoveWatermark:
                 "service_url": ("STRING", {"default": FD_REMOVE_WATERMARK_SERVICE_URL, "multiline": False}),
                 "text_prompt": (
                     "STRING",
-                    {"default": "sticker. label. badge. corner tag. overlay logo.", "multiline": True},
+                    {"default": "bottom right watermark. bottom left watermark. top left watermark. top right watermark. corner logo. watermark text.", "multiline": True},
                 ),
                 "threshold": (
                     "FLOAT",
                     {
-                        "default": 0.30,
+                        "default": 0.3,
                     },
                 ),
                 "text_threshold": (
                     "FLOAT",
                     {
-                        "default": 0.25,
+                        "default": 0.35,
                     },
                 ),
                 "max_side": (
@@ -48,13 +48,13 @@ class FD_RemoveWatermark:
                 "mask_dilate_ksize": (
                     "INT",
                     {
-                        "default": 5,
+                        "default": 9,
                     },
                 ),
                 "mask_dilate_iters": (
                     "INT",
                     {
-                        "default": 1,
+                        "default": 2,
                     },
                 ),
                 "inpaint_method": (["lama"],),
