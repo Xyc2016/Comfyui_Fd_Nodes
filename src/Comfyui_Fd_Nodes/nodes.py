@@ -9,6 +9,9 @@ import requests
 import torch
 from PIL import Image
 
+from .old_fd_nodes import FD_imgToText_Doubao, FD_Upload
+from .old_gemini_api_node import FD_GeminiImage
+
 FD_REMOVE_WATERMARK_SERVICE_URL = os.getenv("FD_REMOVE_WATERMARK_SERVICE_URL", "http://localhost:8000/v1/process")
 
 
@@ -261,7 +264,17 @@ class Example:
 
 # A dictionary that contains all nodes you want to export with their names
 # NOTE: names should be globally unique
-NODE_CLASS_MAPPINGS = {"FD_RemoveWatermark": FD_RemoveWatermark}
+NODE_CLASS_MAPPINGS = {
+    "FD_RemoveWatermark": FD_RemoveWatermark,
+    "FD_Upload": FD_Upload,
+    "FD_imgToText_Doubao": FD_imgToText_Doubao,
+    "FD_GeminiImage": FD_GeminiImage,
+}
 
 # A dictionary that contains the friendly/humanly readable titles for the nodes
-NODE_DISPLAY_NAME_MAPPINGS = {"FD_RemoveWatermark": "Remove Watermark"}
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "FD_RemoveWatermark": "Remove Watermark",
+    "FD_Upload": "FD Upload to OSS",
+    "FD_imgToText_Doubao": "FD Image to Text (Doubao)",
+    "FD_GeminiImage": "FD Gemini Image",
+}

@@ -1,0 +1,12 @@
+import os
+
+FD_OSS_ACCESS_KEY_ID = os.getenv("FD_OSS_ACCESS_KEY_ID")
+FD_OSS_ACCESS_KEY_SECRET = os.getenv("FD_OSS_ACCESS_KEY_SECRET")
+FD_OSS_BUCKET_NAME = os.getenv("FD_OSS_BUCKET_NAME")
+FD_OSS_ENDPOINT = os.getenv("FD_OSS_ENDPOINT")
+FD_OSS_URL_PREFIX = os.getenv("FD_OSS_URL_PREFIX")
+FD_OSS_URL_PATH_PREFIX = os.getenv("FD_OSS_URL_PATH_PREFIX", "devops/comfyui/text_img")
+FD_OSS_URL_PATH_PREFIX_GEMINI =  os.getenv("FD_OSS_URL_PATH_PREFIX_GEMINI", "devops/comfyui/segment_img")
+FD_GEMINI_URL = os.getenv("FD_GEMINI_URL")
+FD_DOUBAO_KEY = os.getenv("FD_DOUBAO_KEY")
+FD_DOUBAO_URL = os.getenv("FD_DOUBAO_URL")
