@@ -1,2 +1,6 @@
 torch
 pillow
+pydantic
+numpy
+requests
+oss2
