@@ -90,6 +90,13 @@ class FD_GeminiImage(ComfyNodeABC):
     def INPUT_TYPES(cls) -> InputTypeDict:
         return {
             "required": {
+                "out_request_id": (
+                    IO.STRING,
+                    {
+                        "default": "default",
+                        "tooltip": "FD out_request_id for generation",
+                    },
+                ),
                 "prompt": (
                     IO.STRING,
                     {
@@ -111,7 +118,7 @@ class FD_GeminiImage(ComfyNodeABC):
                     {
                         "tooltip": "The Pixel to output for gemini-3-pro-image-preview",
                         "options": ["1K", "2K", "4K"],
-                        "default": "",
+                        "default": "2K",
                     },
                 ),
                 "seed": (
@@ -168,9 +175,10 @@ class FD_GeminiImage(ComfyNodeABC):
     GEMINI_URL = FD_GEMINI_URL
 
     def api_call(self,
+        out_request_id: str,
         prompt: str,
         model: str,
-        resolution: str,
+        resolution: Optional[str] = None,
         images: Optional[IO.IMAGE] = None,
         files: Optional[list[GeminiPart]] = None,
         n=1,
@@ -178,6 +186,7 @@ class FD_GeminiImage(ComfyNodeABC):
         **kwargs,
     ):
         body = {
+            "out_request_id": out_request_id,
             "prompt": prompt,
             "model": model
         }
@@ -213,4 +222,5 @@ class FD_GeminiImage(ComfyNodeABC):
         output_image = bytesio_to_image_tensor(image_bytesio)
         output_text = result["message"]
         return (output_image, output_text,)
+
 
