@@ -1,3 +1,4 @@
+import logging
 from enum import Enum
 from io import BytesIO
 from typing import Optional
@@ -15,15 +16,17 @@ from .config import (
     FD_OSS_ACCESS_KEY_SECRET,
     FD_OSS_BUCKET_NAME,
     FD_OSS_ENDPOINT,
-    FD_OSS_URL_PREFIX,
     FD_OSS_URL_PATH_PREFIX_GEMINI,
+    FD_OSS_URL_PREFIX,
 )
-
 from .utils.common_util import (
     bytes_calculate_hex_md5,
     bytesio_to_image_tensor,
     downscale_image_tensor,
 )
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 class GeminiMimeType(str, Enum):
@@ -190,6 +193,7 @@ class FD_GeminiImage(ComfyNodeABC):
             "prompt": prompt,
             "model": model
         }
+        logger.info(f"Calling Gemini API with {body}")
         if resolution:
             body["resolution"] = resolution
         if images is not None:
@@ -215,7 +219,7 @@ class FD_GeminiImage(ComfyNodeABC):
         if response.status_code != 200:
             raise Exception(f"Failed to call API: {response.content}")
         result = response.json()
-        print(result)
+        logger.info(f"Gemini API response: {result}")
         result_url = result["result_image_url"]
         image_content = requests.get(result_url).content
         image_bytesio = BytesIO(image_content)
