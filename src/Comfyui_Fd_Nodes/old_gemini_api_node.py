@@ -208,7 +208,7 @@ class FD_GeminiImage(ComfyNodeABC):
                 img_byte_arr = BytesIO()
                 img.save(img_byte_arr, format="PNG")
                 img_byte_arr = img_byte_arr.getvalue()
-                file_oss_path = f"{FD_OSS_URL_PATH_PREFIX_GEMINI}/{bytes_calculate_hex_md5(img_byte_arr)}"
+                file_oss_path = f"{FD_OSS_URL_PATH_PREFIX_GEMINI}/{bytes_calculate_hex_md5(img_byte_arr)}.png"
                 self.bucket.put_object(file_oss_path, img_byte_arr)
                 print(f"upload {file_oss_path}")
                 oss_file_url = f"{self.oss_url_prefix}{file_oss_path}"
