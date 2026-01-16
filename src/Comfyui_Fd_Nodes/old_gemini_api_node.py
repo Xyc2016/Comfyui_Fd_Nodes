@@ -1,4 +1,6 @@
+import json
 import logging
+from datetime import datetime
 from enum import Enum
 from io import BytesIO
 from typing import Optional
@@ -12,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from .config import (
     FD_GEMINI_URL,
+    FD_GEMINI_WEBHOOK_URL,
     FD_OSS_ACCESS_KEY_ID,
     FD_OSS_ACCESS_KEY_SECRET,
     FD_OSS_BUCKET_NAME,
@@ -69,6 +72,16 @@ class GeminiImageModel(str, Enum):
 
     gemini_2_5_flash_image_preview = "google/gemini-2.5-flash-image-preview"
     gemini_3_pro_image_preview = "google/gemini-3-pro-image-preview"
+
+
+def fd_gemini_send_webhook(gemini_req_body: dict):
+    now = datetime.now()
+    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    headers = {"Content-Type": "application/json"}
+    data = {"msgtype": "text", "text": {"content": json.dumps({"datetime": now_str, "gemini_req_body": gemini_req_body}, ensure_ascii=False, indent=4)}}
+
+    requests.post(FD_GEMINI_WEBHOOK_URL, headers=headers, json=data)
+
 
 class FD_GeminiImage(ComfyNodeABC):
     """
@@ -214,6 +227,15 @@ class FD_GeminiImage(ComfyNodeABC):
                 oss_file_url = f"{self.oss_url_prefix}{file_oss_path}"
                 image_url_list.append(oss_file_url)
             body['image_url_list'] = image_url_list
+
+
+        if FD_GEMINI_WEBHOOK_URL:
+            try:
+                print("Sending gemini webhook message...")
+                fd_gemini_send_webhook(body)
+            except Exception:
+                pass
+
 
         response = requests.post(self.GEMINI_URL, json=body)
         if response.status_code != 200:
