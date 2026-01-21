@@ -1,16 +1,43 @@
+from datetime import datetime
 import io
+import json
+import logging
 import os
 from inspect import cleandoc
-from typing import Any, Dict, Tuple
+from io import BytesIO
+from typing import Any, Dict, Optional, Tuple
 from uuid import uuid4
 
 import numpy as np
+import oss2
 import requests
 import torch
+from comfy.comfy_types.node_typing import IO, ComfyNodeABC, InputTypeDict
 from PIL import Image
 
+from .config import (
+    FD_FLUX2KLEIN_PASSWORD,
+    FD_FLUX2KLEIN_URL,
+    FD_FLUX2KLEIN_USERNAME,
+    FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL,
+    FD_OSS_ACCESS_KEY_ID,
+    FD_OSS_ACCESS_KEY_SECRET,
+    FD_OSS_BUCKET_NAME,
+    FD_OSS_ENDPOINT,
+    FD_OSS_URL_PATH_PREFIX_FLUX,
+    FD_OSS_URL_PREFIX,
+)
 from .old_fd_nodes import FD_imgToText_Doubao, FD_Upload
 from .old_gemini_api_node import FD_GeminiImage
+from .utils.common_util import (
+    bytes_calculate_hex_md5,
+    bytesio_to_image_tensor,
+    downscale_image_tensor,
+)
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 FD_REMOVE_WATERMARK_SERVICE_URL = os.getenv("FD_REMOVE_WATERMARK_SERVICE_URL", "http://localhost:8000/v1/process")
 
@@ -155,6 +182,124 @@ class FD_RemoveWatermark:
             return (image,)
 
 
+def fd_flux2_klein_send_webhook(flux2_klein_req_body: dict):
+    now = datetime.now()
+    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    headers = {"Content-Type": "application/json"}
+    data = {"msgtype": "text", "text": {"content": json.dumps({"datetime": now_str, "flux2_klein_req_body": flux2_klein_req_body}, ensure_ascii=False, indent=4)}}
+
+    requests.post(FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL, headers=headers, json=data)
+
+
+class FD_Flux2KleinGenImage(ComfyNodeABC):
+    """
+    Node to generate text and image responses from a Flux2KleinGen model.
+    """
+    def __init__(self):
+        auth = oss2.Auth(FD_OSS_ACCESS_KEY_ID, FD_OSS_ACCESS_KEY_SECRET)
+        self.bucket = oss2.Bucket(
+            auth=auth,
+            bucket_name=FD_OSS_BUCKET_NAME,
+            endpoint=FD_OSS_ENDPOINT,
+            connect_timeout=30
+        )
+        self.oss_url_prefix = FD_OSS_URL_PREFIX
+
+    @classmethod
+    def INPUT_TYPES(cls) -> InputTypeDict:
+        return {
+            "required": {
+                "service_url": ("STRING", {"default": FD_FLUX2KLEIN_URL, "multiline": False}),
+                "out_request_id": (
+                    IO.STRING,
+                    {
+                        "default": "default",
+                        "tooltip": "FD out_request_id for generation",
+                    },
+                ),
+                "prompt": (
+                    IO.STRING,
+                    {
+                        "multiline": True,
+                        "default": "",
+                        "tooltip": "Text prompt for generation",
+                    },
+                ),
+            },
+            "optional": {
+                "images": (
+                    IO.IMAGE,
+                    {
+                        "default": None,
+                        "tooltip": "Optional image(s) to use as context for the model. To include multiple images, you can use the Batch Images node.",
+                    },
+                ),
+            },
+            "hidden": {
+                "auth_token": "AUTH_TOKEN_COMFY_ORG",
+                "comfy_api_key": "API_KEY_COMFY_ORG",
+                "unique_id": "UNIQUE_ID",
+            },
+        }
+
+    RETURN_TYPES = (IO.IMAGE, )
+    FUNCTION = "api_call"
+    CATEGORY = "image/generation"
+    DESCRIPTION = "Edit images synchronously via Flux2Klein API."
+    API_NODE = True
+
+    def api_call(self,
+        service_url: str,
+        out_request_id: str,
+        prompt: str,
+        images: Optional[IO.IMAGE] = None,
+        **kwargs,
+    ):
+        body = {
+            "out_request_id": out_request_id,
+            "prompt": prompt,
+        }
+        if images is not None:
+            batch_size = images.shape[0]
+            image_url_list = []
+            for i in range(batch_size):
+                single_image = images[i : i + 1]
+                scaled_image = downscale_image_tensor(single_image).squeeze()
+
+                image_np = (scaled_image.numpy() * 255).astype(np.uint8)
+                img = Image.fromarray(image_np)
+                img_byte_arr = BytesIO()
+                img.save(img_byte_arr, format="PNG")
+                img_byte_arr = img_byte_arr.getvalue()
+                file_oss_path = f"{FD_OSS_URL_PATH_PREFIX_FLUX}/{bytes_calculate_hex_md5(img_byte_arr)}.png"
+                self.bucket.put_object(file_oss_path, img_byte_arr)
+                print(f"upload {file_oss_path}")
+                oss_file_url = f"{self.oss_url_prefix}{file_oss_path}"
+                image_url_list.append(oss_file_url)
+            body['images'] = image_url_list
+
+        if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
+            try:
+                print("Sending flux2_klein webhook message...")
+                fd_flux2_klein_send_webhook(body)
+            except Exception:
+                pass
+
+        logger.info(f"Calling Flux2Klein API with {body}")
+        # example response json {'urls': ['https://zhiyi-image.oss-cn-hangzhou.aliyuncs.com//devops/comfyui/output/20260121/bed973ec3ccb31d49d43a31d9f535b65.png'], 'status': 'success', 'cost_time': 45.2}
+        response = requests.post(service_url, auth=(FD_FLUX2KLEIN_USERNAME, FD_FLUX2KLEIN_PASSWORD), json=body)
+        response.raise_for_status()
+        if response.status_code != 200:
+            raise Exception(f"Failed to call API: {response.content}")
+        result = response.json()
+        logger.info(f"Flux2Klein API response: {result}")
+        result_url = result["urls"][0] # TODO: 暂时只支持1张图
+        image_content = requests.get(result_url).content
+        image_bytesio = BytesIO(image_content)
+        output_image = bytesio_to_image_tensor(image_bytesio)
+        return (output_image,)
+
+
 class Example:
     """
     A example node
@@ -269,6 +414,7 @@ NODE_CLASS_MAPPINGS = {
     "FD_Upload": FD_Upload,
     "FD_imgToText_Doubao": FD_imgToText_Doubao,
     "FD_GeminiImage": FD_GeminiImage,
+    "FD_Flux2KleinGenImage": FD_Flux2KleinGenImage,
 }
 
 # A dictionary that contains the friendly/humanly readable titles for the nodes
@@ -277,4 +423,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FD_Upload": "FD Upload to OSS",
     "FD_imgToText_Doubao": "FD Image to Text (Doubao)",
     "FD_GeminiImage": "FD Gemini Image",
+    "FD_Flux2KleinGenImage": "FD Flux2Klein Gen Image",
 }
