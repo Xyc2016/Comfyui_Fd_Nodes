@@ -5,6 +5,7 @@ import logging
 import os
 from inspect import cleandoc
 from io import BytesIO
+import random
 from typing import Any, Dict, Optional, Tuple
 from uuid import uuid4
 
@@ -258,6 +259,7 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
         body = {
             "out_request_id": out_request_id,
             "prompt": prompt,
+            "seed": random.getrandbits(28),
         }
         if images is not None:
             batch_size = images.shape[0]
