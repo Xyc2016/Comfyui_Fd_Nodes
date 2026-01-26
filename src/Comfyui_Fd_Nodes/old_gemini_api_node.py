@@ -27,6 +27,7 @@ from .utils.common_util import (
     bytesio_to_image_tensor,
     downscale_image_tensor,
 )
+from .utils.webhook import webhook_send
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -251,6 +252,22 @@ class FD_GeminiImage(ComfyNodeABC):
         if response.status_code != 200:
             raise Exception(f"Failed to call API: {response.content}")
         result = response.json()
+
+        if FD_GEMINI_WEBHOOK_URL:
+            try:
+                print("Sending gemini webhook message...")
+                webhook_send(FD_GEMINI_WEBHOOK_URL, {
+                    "gemini_full": {
+                        "request": body,
+                        "response": {
+                            "result_image_url": result.get("result_image_url"),
+                            "cost_time": result.get("cost_time"),
+                        },
+                    }
+                })
+            except Exception:
+                pass
+
         logger.info(f"Gemini API response: {result}")
         result_url = result["result_image_url"]
         image_content = requests.get(result_url).content
