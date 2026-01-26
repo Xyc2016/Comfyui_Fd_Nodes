@@ -163,6 +163,14 @@ class FD_GeminiImage(ComfyNodeABC):
                         "tooltip": "Optional file(s) to use as context for the model. Accepts inputs from the Gemini Generate Content Input Files node.",
                     },
                 ),
+                "aspect_ratio": (
+                    IO.COMBO,
+                    {
+                        "default": "",
+                        "options": ["", "1:1", "3:4","9:16"],
+                        "tooltip": "Optional aspect ratio for the generated image",
+                    }
+                ),
                 # TODO: later we can add this parameter later
                 # "n": (
                 #     IO.INT,
@@ -196,6 +204,7 @@ class FD_GeminiImage(ComfyNodeABC):
         model: str,
         resolution: Optional[str] = None,
         images: Optional[IO.IMAGE] = None,
+        aspect_ratio: str = "",
         files: Optional[list[GeminiPart]] = None,
         n=1,
         unique_id: Optional[str] = None,
@@ -204,9 +213,9 @@ class FD_GeminiImage(ComfyNodeABC):
         body = {
             "out_request_id": out_request_id,
             "prompt": prompt,
-            "model": model
+            "model": model,
+            "aspect_ratio": aspect_ratio,
         }
-        logger.info(f"Calling Gemini API with {body}")
         if resolution:
             body["resolution"] = resolution
         if images is not None:
@@ -236,6 +245,7 @@ class FD_GeminiImage(ComfyNodeABC):
             except Exception:
                 pass
 
+        logger.info(f"Calling Gemini API with {body}")
 
         response = requests.post(self.GEMINI_URL, json=body)
         if response.status_code != 200:
