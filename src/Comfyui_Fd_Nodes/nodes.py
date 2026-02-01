@@ -226,6 +226,13 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
                         "tooltip": "Text prompt for generation",
                     },
                 ),
+                "aspect_ratio": (
+                    ["auto", "1:1", "3:4", "9:16"],
+                    {
+                        "default": "auto",
+                        "tooltip": "Aspect ratio for generation",
+                    },
+                ),
             },
             "optional": {
                 "images": (
@@ -253,6 +260,7 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
         service_url: str,
         out_request_id: str,
         prompt: str,
+        aspect_ratio: str,
         images: Optional[IO.IMAGE] = None,
         **kwargs,
     ):
@@ -260,6 +268,7 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
             "out_request_id": out_request_id,
             "prompt": prompt,
             "seed": random.getrandbits(28),
+            "ratio": aspect_ratio,
         }
         if images is not None:
             batch_size = images.shape[0]
