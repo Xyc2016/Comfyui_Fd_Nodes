@@ -1,11 +1,12 @@
-from datetime import datetime
 import io
 import json
 import logging
 import os
+import random
+import time
+from datetime import datetime
 from inspect import cleandoc
 from io import BytesIO
-import random
 from typing import Any, Dict, Optional, Tuple
 from uuid import uuid4
 
@@ -264,6 +265,7 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
         images: Optional[IO.IMAGE] = None,
         **kwargs,
     ):
+        random.seed(time.time())
         body = {
             "out_request_id": out_request_id,
             "prompt": prompt,
