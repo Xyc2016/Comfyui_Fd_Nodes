@@ -211,7 +211,6 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
     def INPUT_TYPES(cls) -> InputTypeDict:
         return {
             "required": {
-                "service_url": ("STRING", {"default": FD_FLUX2KLEIN_URL, "multiline": False}),
                 "out_request_id": (
                     IO.STRING,
                     {
@@ -258,7 +257,6 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
     API_NODE = True
 
     def api_call(self,
-        service_url: str,
         out_request_id: str,
         prompt: str,
         aspect_ratio: str,
@@ -300,7 +298,7 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
 
         logger.info(f"Calling Flux2Klein API with {body}")
         # example response json {'urls': ['https://zhiyi-image.oss-cn-hangzhou.aliyuncs.com//devops/comfyui/output/20260121/bed973ec3ccb31d49d43a31d9f535b65.png'], 'status': 'success', 'cost_time': 45.2}
-        response = requests.post(service_url, auth=(FD_FLUX2KLEIN_USERNAME, FD_FLUX2KLEIN_PASSWORD), json=body)
+        response = requests.post(FD_FLUX2KLEIN_URL, auth=(FD_FLUX2KLEIN_USERNAME, FD_FLUX2KLEIN_PASSWORD), json=body)
         response.raise_for_status()
         if response.status_code != 200:
             raise Exception(f"Failed to call API: {response.content}")
