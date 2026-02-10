@@ -36,6 +36,7 @@ from .utils.common_util import (
     bytesio_to_image_tensor,
     downscale_image_tensor,
 )
+from .utils.webhook import webhook_send
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -304,6 +305,17 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
             raise Exception(f"Failed to call API: {response.content}")
         result = response.json()
         logger.info(f"Flux2Klein API response: {result}")
+        if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
+            try:
+                print("Sending flux2_klein webhook message...")
+                webhook_send(FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL, {
+                    "flux2_klein_full": {
+                        "request": body,
+                        "response": result,
+                    }
+                })
+            except Exception:
+                pass
         result_url = result["urls"][0] # TODO: 暂时只支持1张图
         image_content = requests.get(result_url).content
         image_bytesio = BytesIO(image_content)
