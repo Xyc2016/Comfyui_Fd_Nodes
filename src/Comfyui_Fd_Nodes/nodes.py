@@ -185,11 +185,20 @@ class FD_RemoveWatermark:
             return (image,)
 
 
-def fd_flux2_klein_send_webhook(flux2_klein_req_body: dict):
+def fd_flux2_klein_send_webhook(service_url: str, flux2_klein_req_body: dict):
     now = datetime.now()
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
     headers = {"Content-Type": "application/json"}
-    data = {"msgtype": "text", "text": {"content": json.dumps({"datetime": now_str, "flux2_klein_req_body": flux2_klein_req_body}, ensure_ascii=False, indent=4)}}
+    data = {
+        "msgtype": "text",
+        "text": {
+            "content": json.dumps(
+                {"datetime": now_str, "service_url": service_url, "flux2_klein_req_body": flux2_klein_req_body},
+                ensure_ascii=False,
+                indent=4,
+            )
+        },
+    }
 
     requests.post(FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL, headers=headers, json=data)
 
@@ -243,6 +252,22 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
                         "tooltip": "Optional image(s) to use as context for the model. To include multiple images, you can use the Batch Images node.",
                     },
                 ),
+                "service_url": (
+                    IO.STRING,
+                    {
+                        "default": FD_FLUX2KLEIN_URL,
+                        "tooltip": "Flux2Klein service URL",
+                    },
+                ),
+                "seed": (
+                    IO.INT,
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": 2 ** 32 - 1,
+                        "tooltip": "Random seed for generation.",
+                    },
+                )
             },
             "hidden": {
                 "auth_token": "AUTH_TOKEN_COMFY_ORG",
@@ -262,13 +287,14 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
         prompt: str,
         aspect_ratio: str,
         images: Optional[IO.IMAGE] = None,
+        service_url: str = FD_FLUX2KLEIN_URL,
+        seed: int = 0,
         **kwargs,
     ):
-        random.seed(time.time())
         body = {
             "out_request_id": out_request_id,
             "prompt": prompt,
-            "seed": random.getrandbits(28),
+            "seed": seed,
             "ratio": aspect_ratio,
         }
         if images is not None:
@@ -293,13 +319,13 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
         if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
             try:
                 print("Sending flux2_klein webhook message...")
-                fd_flux2_klein_send_webhook(body)
+                fd_flux2_klein_send_webhook(service_url, body)
             except Exception:
                 pass
 
         logger.info(f"Calling Flux2Klein API with {body}")
         # example response json {'urls': ['https://zhiyi-image.oss-cn-hangzhou.aliyuncs.com//devops/comfyui/output/20260121/bed973ec3ccb31d49d43a31d9f535b65.png'], 'status': 'success', 'cost_time': 45.2}
-        response = requests.post(FD_FLUX2KLEIN_URL, auth=(FD_FLUX2KLEIN_USERNAME, FD_FLUX2KLEIN_PASSWORD), json=body)
+        response = requests.post(service_url, auth=(FD_FLUX2KLEIN_USERNAME, FD_FLUX2KLEIN_PASSWORD), json=body)
         response.raise_for_status()
         if response.status_code != 200:
             raise Exception(f"Failed to call API: {response.content}")
