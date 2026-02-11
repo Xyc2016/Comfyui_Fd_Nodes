@@ -302,8 +302,14 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
             image_url_list = []
             for i in range(batch_size):
                 single_image = images[i : i + 1]
-                scaled_image = downscale_image_tensor(single_image).squeeze()
-
+                original_image = single_image.squeeze()
+                scaled_image = downscale_image_tensor(single_image, total_pixels=2048 * 2048).squeeze()
+                logger.info(
+                    "FD_Flux2KleinGenImage Image %s resolution: original=%s scaled=%s",
+                    i,
+                    tuple(original_image.shape),
+                    tuple(scaled_image.shape),
+                )
                 image_np = (scaled_image.numpy() * 255).astype(np.uint8)
                 img = Image.fromarray(image_np)
                 img_byte_arr = BytesIO()

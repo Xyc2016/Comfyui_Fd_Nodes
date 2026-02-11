@@ -31,7 +31,7 @@ def bytesio_to_image_tensor(image_bytesio: BytesIO, mode: str = "RGBA") -> torch
     image_array = np.array(image).astype(np.float32) / 255.0
     return torch.from_numpy(image_array).unsqueeze(0)
 
-def downscale_image_tensor(image, total_pixels=1536 * 1024) -> torch.Tensor:
+def downscale_image_tensor(image, *, total_pixels: int) -> torch.Tensor:
     """Downscale input image tensor to roughly the specified total pixels."""
     samples = image.movedim(-1, 1)
     total = int(total_pixels)
