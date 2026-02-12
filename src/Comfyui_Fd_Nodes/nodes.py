@@ -267,7 +267,14 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
                         "max": 2 ** 32 - 1,
                         "tooltip": "Random seed for generation.",
                     },
-                )
+                ),
+                "resolution": (
+                    IO.COMBO,
+                    {
+                        "options": ["1K", "2K"],
+                        "default": "2K",
+                    },
+                ),
             },
             "hidden": {
                 "auth_token": "AUTH_TOKEN_COMFY_ORG",
@@ -289,6 +296,7 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
         images: Optional[IO.IMAGE] = None,
         service_url: str = FD_FLUX2KLEIN_URL,
         seed: int = 0,
+        resolution: str = "2K",
         **kwargs,
     ):
         body = {
@@ -296,6 +304,7 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
             "prompt": prompt,
             "seed": seed,
             "ratio": aspect_ratio,
+            "size": resolution,
         }
         if images is not None:
             batch_size = images.shape[0]
