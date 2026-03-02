@@ -22,11 +22,14 @@ from .config import (
     FD_FLUX2KLEIN_URL,
     FD_FLUX2KLEIN_USERNAME,
     FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL,
+    FD_LITELLM_BASE_URL,
+    FD_LITELLM_API_KEY,
     FD_OSS_ACCESS_KEY_ID,
     FD_OSS_ACCESS_KEY_SECRET,
     FD_OSS_BUCKET_NAME,
     FD_OSS_ENDPOINT,
     FD_OSS_URL_PATH_PREFIX_FLUX,
+    FD_OSS_URL_PATH_PREFIX_BEFORE_GEN,
     FD_OSS_URL_PREFIX,
 )
 from .old_fd_nodes import FD_imgToText_Doubao, FD_Upload
@@ -364,6 +367,168 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
         return (output_image,)
 
 
+class FD_SeedreamImage(ComfyNodeABC):
+    """
+    Node to generate images using Seedream 5.0 Lite model.
+    """
+    def __init__(self):
+        auth = oss2.Auth(FD_OSS_ACCESS_KEY_ID, FD_OSS_ACCESS_KEY_SECRET)
+        self.bucket = oss2.Bucket(
+            auth=auth,
+            bucket_name=FD_OSS_BUCKET_NAME,
+            endpoint=FD_OSS_ENDPOINT,
+            connect_timeout=30
+        )
+        self.oss_url_prefix = FD_OSS_URL_PREFIX
+
+    @classmethod
+    def INPUT_TYPES(cls) -> InputTypeDict:
+        return {
+            "required": {
+                "prompt": (
+                    IO.STRING,
+                    {
+                        "multiline": True,
+                        "default": "",
+                        "tooltip": "Text prompt for generation",
+                    },
+                ),
+                "model": (
+                    ["doubao-seedream-5.0-lite"],
+                    {
+                        "default": "doubao-seedream-5.0-lite",
+                        "tooltip": "Model to use for generation",
+                    },
+                ),
+                "size": (
+                    ["1K", "2K"],
+                    {
+                        "default": "2K",
+                        "tooltip": "Output image size",
+                    },
+                ),
+            },
+            "optional": {
+                "images": (
+                    IO.IMAGE,
+                    {
+                        "default": None,
+                        "tooltip": "Optional image(s) to use as context. Multiple images supported.",
+                    },
+                ),
+                "output_format": (
+                    ["png", "jpg"],
+                    {
+                        "default": "png",
+                        "tooltip": "Output image format",
+                    },
+                ),
+            },
+        }
+
+    RETURN_TYPES = (IO.IMAGE, )
+    FUNCTION = "api_call"
+    CATEGORY = "image/generation"
+    DESCRIPTION = "Generate images using Seedream 5.0 Lite model."
+    API_NODE = True
+
+    def api_call(
+        self,
+        prompt: str,
+        model: str,
+        size: str,
+        images: Optional[IO.IMAGE] = None,
+        output_format: str = "png",
+        **kwargs,
+    ):
+        body = {
+            "model": model,
+            "prompt": prompt,
+            "sequential_image_generation": "disabled",
+            "size": size,
+            "output_format": output_format,
+            "watermark": False,
+        }
+
+        # Upload images to OSS if provided
+        if images is not None:
+            batch_size = images.shape[0]
+            image_url_list = []
+            for i in range(batch_size):
+                single_image = images[i : i + 1]
+                # original_image = single_image.squeeze()
+                # scaled_image = downscale_image_tensor(single_image, total_pixels=2048 * 2048).squeeze()
+                # logger.info(
+                #     "FD_SeedreamImage Image %s resolution: original=%s scaled=%s",
+                #     i,
+                #     tuple(original_image.shape),
+                #     tuple(scaled_image.shape),
+                # )
+                scaled_image = single_image.squeeze() # 现在是测试阶段，先不要downscale TODO: 到时候考虑改一下
+                image_np = (scaled_image.numpy() * 255).astype(np.uint8)
+                img = Image.fromarray(image_np)
+                img_byte_arr = BytesIO()
+                img.save(img_byte_arr, format="PNG")
+                img_byte_arr = img_byte_arr.getvalue()
+                file_oss_path = f"{FD_OSS_URL_PATH_PREFIX_BEFORE_GEN}/{bytes_calculate_hex_md5(img_byte_arr)}.png"
+                self.bucket.put_object(file_oss_path, img_byte_arr)
+                print(f"upload {file_oss_path}")
+                oss_file_url = f"{self.oss_url_prefix}{file_oss_path}"
+                image_url_list.append(oss_file_url)
+            body['image'] = image_url_list
+
+        if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
+            try:
+                print("Sending seedream webhook message...")
+                webhook_send(FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL, {
+                    "seedream_request": body,
+                })
+            except Exception:
+                pass
+
+        logger.info(f"Calling Seedream API with {body}")
+
+        # Call API
+        headers = {
+            "Authorization": f"Bearer {FD_LITELLM_API_KEY}",
+            "Content-Type": "application/json",
+        }
+
+        response = requests.post(
+            url=f"{FD_LITELLM_BASE_URL}/v1/images/generations",
+            headers=headers,
+            json=body,
+            timeout=300,
+        )
+        response.raise_for_status()
+
+        if response.status_code != 200:
+            raise Exception(f"Failed to call API: {response.content}")
+
+        result = response.json()
+        logger.info(f"Seedream API response: {result}")
+
+        if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
+            try:
+                print("Sending seedream webhook message...")
+                webhook_send(FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL, {
+                    "seedream_full": {
+                        "request": body,
+                        "response": result,
+                    }
+                })
+            except Exception:
+                pass
+
+        # Get result image URL
+        result_url = result["data"][0]["url"]
+        image_content = requests.get(result_url).content
+        image_bytesio = BytesIO(image_content)
+        output_image = bytesio_to_image_tensor(image_bytesio)
+
+        return (output_image,)
+
+
 class Example:
     """
     A example node
@@ -479,6 +644,7 @@ NODE_CLASS_MAPPINGS = {
     "FD_imgToText_Doubao": FD_imgToText_Doubao,
     "FD_GeminiImage": FD_GeminiImage,
     "FD_Flux2KleinGenImage": FD_Flux2KleinGenImage,
+    "FD_SeedreamImage": FD_SeedreamImage,
 }
 
 # A dictionary that contains the friendly/humanly readable titles for the nodes
@@ -488,4 +654,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FD_imgToText_Doubao": "FD Image to Text (Doubao)",
     "FD_GeminiImage": "FD Gemini Image",
     "FD_Flux2KleinGenImage": "FD Flux2Klein Gen Image",
+    "FD_SeedreamImage": "FD Seedream Image",
 }
