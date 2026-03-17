@@ -226,7 +226,7 @@ class FD_GeminiImage(ComfyNodeABC):
             for i in range(batch_size):
                 single_image = images[i : i + 1]
                 original_image = single_image.squeeze()
-                scaled_image = downscale_image_tensor(single_image, total_pixels=2048 * 2048).squeeze()
+                scaled_image = downscale_image_tensor(single_image, total_pixels=3072 * 3072).squeeze()
                 logger.info(
                     "FD_GeminiImage Image %s resolution: original=%s scaled=%s",
                     i,
