@@ -33,6 +33,9 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 
+class GenImageServiceError(Exception):
+    pass
+
 class GeminiMimeType(str, Enum):
     application_pdf = 'application/pdf'
     audio_mpeg = 'audio/mpeg'
@@ -218,6 +221,12 @@ class FD_GeminiImage(ComfyNodeABC):
             "model": model,
             "aspect_ratio": aspect_ratio,
         }
+
+        if "TIMEOUT" in prompt:
+            body["debug_resp"] = {"error": {"message": "litellm.Timeout: Connection timed out. Timeout passed=150.0, time taken=150.072 seconds"}}
+        elif "UNKNOWN" in prompt:
+            body["debug_resp"] = {"error": {"message": "XXX"}}
+
         if resolution:
             body["resolution"] = resolution
         if images is not None:
@@ -277,6 +286,10 @@ class FD_GeminiImage(ComfyNodeABC):
                 pass
 
         logger.info(f"Gemini API response: {result}")
+
+        if result.get("error", {}).get("code"):
+            raise GenImageServiceError(result["error"]["code"])
+
         result_url = result["result_image_url"]
         image_content = requests.get(result_url).content
         image_bytesio = BytesIO(image_content)
