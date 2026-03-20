@@ -22,18 +22,18 @@ from .config import (
     FD_FLUX2KLEIN_URL,
     FD_FLUX2KLEIN_USERNAME,
     FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL,
-    FD_LITELLM_BASE_URL,
     FD_LITELLM_API_KEY,
+    FD_LITELLM_BASE_URL,
     FD_OSS_ACCESS_KEY_ID,
     FD_OSS_ACCESS_KEY_SECRET,
     FD_OSS_BUCKET_NAME,
     FD_OSS_ENDPOINT,
-    FD_OSS_URL_PATH_PREFIX_FLUX,
     FD_OSS_URL_PATH_PREFIX_BEFORE_GEN,
+    FD_OSS_URL_PATH_PREFIX_FLUX,
     FD_OSS_URL_PREFIX,
 )
 from .old_fd_nodes import FD_imgToText_Doubao, FD_Upload
-from .old_gemini_api_node import FD_GeminiImage
+from .old_gemini_api_node import FD_GeminiImage, GenImageServiceError
 from .utils.common_util import (
     bytes_calculate_hex_md5,
     bytesio_to_image_tensor,
@@ -342,13 +342,17 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
                 pass
 
         logger.info(f"Calling Flux2Klein API with {body}")
-        # example response json {'urls': ['https://zhiyi-image.oss-cn-hangzhou.aliyuncs.com//devops/comfyui/output/20260121/bed973ec3ccb31d49d43a31d9f535b65.png'], 'status': 'success', 'cost_time': 45.2}
-        response = requests.post(service_url, auth=(FD_FLUX2KLEIN_USERNAME, FD_FLUX2KLEIN_PASSWORD), json=body)
-        response.raise_for_status()
-        if response.status_code != 200:
-            raise Exception(f"Failed to call API: {response.content}")
-        result = response.json()
-        logger.info(f"Flux2Klein API response: {result}")
+        try:
+            # example response json {'urls': ['https://zhiyi-image.oss-cn-hangzhou.aliyuncs.com//devops/comfyui/output/20260121/bed973ec3ccb31d49d43a31d9f535b65.png'], 'status': 'success', 'cost_time': 45.2}
+            response = requests.post(service_url, auth=(FD_FLUX2KLEIN_USERNAME, FD_FLUX2KLEIN_PASSWORD), json=body)
+            response.raise_for_status()
+            if response.status_code != 200:
+                raise Exception(f"Failed to call API: {response.content}")
+            result = response.json()
+            logger.info(f"Flux2Klein API response: {result}")
+            result_url = result["urls"][0] # TODO: 暂时只支持1张图
+        except Exception:
+            raise GenImageServiceError("TIMEOUT")
         if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
             try:
                 print("Sending flux2_klein webhook message...")
@@ -360,7 +364,6 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
                 })
             except Exception:
                 pass
-        result_url = result["urls"][0] # TODO: 暂时只支持1张图
         image_content = requests.get(result_url).content
         image_bytesio = BytesIO(image_content)
         output_image = bytesio_to_image_tensor(image_bytesio)
@@ -488,25 +491,31 @@ class FD_SeedreamImage(ComfyNodeABC):
 
         logger.info(f"Calling Seedream API with {body}")
 
-        # Call API
-        headers = {
-            "Authorization": f"Bearer {FD_LITELLM_API_KEY}",
-            "Content-Type": "application/json",
-        }
+        try:
+            # Call API
+            headers = {
+                "Authorization": f"Bearer {FD_LITELLM_API_KEY}",
+                "Content-Type": "application/json",
+            }
 
-        response = requests.post(
-            url=f"{FD_LITELLM_BASE_URL}/v1/images/generations",
-            headers=headers,
-            json=body,
-            timeout=300,
-        )
-        response.raise_for_status()
+            response = requests.post(
+                url=f"{FD_LITELLM_BASE_URL}/v1/images/generations",
+                headers=headers,
+                json=body,
+                timeout=300,
+            )
+            response.raise_for_status()
 
-        if response.status_code != 200:
-            raise Exception(f"Failed to call API: {response.content}")
+            if response.status_code != 200:
+                raise Exception(f"Failed to call API: {response.content}")
 
-        result = response.json()
-        logger.info(f"Seedream API response: {result}")
+            result = response.json()
+            logger.info(f"Seedream API response: {result}")
+
+            # Get result image URL
+            result_url = result["data"][0]["url"]
+        except Exception:
+            raise GenImageServiceError("TIMEOUT")
 
         if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
             try:
@@ -519,9 +528,6 @@ class FD_SeedreamImage(ComfyNodeABC):
                 })
             except Exception:
                 pass
-
-        # Get result image URL
-        result_url = result["data"][0]["url"]
         image_content = requests.get(result_url).content
         image_bytesio = BytesIO(image_content)
         output_image = bytesio_to_image_tensor(image_bytesio)
