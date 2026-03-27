@@ -235,15 +235,15 @@ class FD_GeminiImage(ComfyNodeABC):
             for i in range(batch_size):
                 single_image = images[i : i + 1]
                 original_image = single_image.squeeze()
-                # scaled_image = downscale_image_tensor(single_image, total_pixels=3072 * 3072).squeeze()
-                # logger.info(
-                #     "FD_GeminiImage Image %s resolution: original=%s scaled=%s",
-                #     i,
-                #     tuple(original_image.shape),
-                #     tuple(scaled_image.shape),
-                # )
+                scaled_image = downscale_image_tensor(single_image, total_pixels=3072 * 3072).squeeze()
+                logger.info(
+                    "FD_GeminiImage Image %s resolution: original=%s scaled=%s",
+                    i,
+                    tuple(original_image.shape),
+                    tuple(scaled_image.shape),
+                )
 
-                image_np = (original_image.numpy() * 255).astype(np.uint8) # FIXME:临时改一下，产品要测原图
+                image_np = (scaled_image.numpy() * 255).astype(np.uint8)
                 img = Image.fromarray(image_np)
                 img_byte_arr = BytesIO()
                 img.save(img_byte_arr, format="PNG")
