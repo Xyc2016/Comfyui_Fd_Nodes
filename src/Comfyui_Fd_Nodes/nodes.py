@@ -4,6 +4,7 @@ import logging
 import os
 import random
 import time
+import traceback
 from datetime import datetime
 from inspect import cleandoc
 from io import BytesIO
@@ -352,6 +353,7 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
             logger.info(f"Flux2Klein API response: {result}")
             result_url = result["urls"][0] # TODO: 暂时只支持1张图
         except Exception:
+            traceback.print_exc()
             raise GenImageServiceError("TIMEOUT")
         if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
             try:
@@ -515,6 +517,7 @@ class FD_SeedreamImage(ComfyNodeABC):
             # Get result image URL
             result_url = result["data"][0]["url"]
         except Exception:
+            traceback.print_exc()
             raise GenImageServiceError("TIMEOUT")
 
         if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
