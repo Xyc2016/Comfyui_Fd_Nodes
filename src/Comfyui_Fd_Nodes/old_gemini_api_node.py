@@ -196,7 +196,7 @@ class FD_GeminiImage(ComfyNodeABC):
             },
         }
 
-    RETURN_TYPES = (IO.IMAGE, IO.STRING)
+    RETURN_TYPES = (IO.IMAGE, IO.STRING, IO.STRING)
     FUNCTION = "api_call"
     CATEGORY = "image/generation"
     DESCRIPTION = "Edit images synchronously via Google API."
@@ -295,6 +295,6 @@ class FD_GeminiImage(ComfyNodeABC):
         image_bytesio = BytesIO(image_content)
         output_image = bytesio_to_image_tensor(image_bytesio)
         output_text = result["message"]
-        return (output_image, output_text,)
+        return (output_image, output_text, result_url)
 
 
