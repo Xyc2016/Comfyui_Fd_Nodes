@@ -32,6 +32,9 @@ from .config import (
     FD_OSS_URL_PATH_PREFIX_BEFORE_GEN,
     FD_OSS_URL_PATH_PREFIX_FLUX,
     FD_OSS_URL_PREFIX,
+    FD_Z_IMAGE_TURBO_PASSWORD,
+    FD_Z_IMAGE_TURBO_URL,
+    FD_Z_IMAGE_TURBO_USERNAME,
 )
 from .old_fd_nodes import FD_imgToText_Doubao, FD_Upload
 from .old_gemini_api_node import FD_GeminiImage, GenImageServiceError
@@ -228,7 +231,7 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
                 "out_request_id": (
                     IO.STRING,
                     {
-                        "default": "default",
+                        "default": "unknown_request_id",
                         "tooltip": "FD out_request_id for generation",
                     },
                 ),
@@ -370,6 +373,212 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
         image_bytesio = BytesIO(image_content)
         output_image = bytesio_to_image_tensor(image_bytesio)
         return (output_image,)
+
+
+class FD_ZImageTurboGenImage(ComfyNodeABC):
+    """
+    Node to generate text and image responses from a Z-Image-Turbo model.
+    """
+
+    def __init__(self):
+        auth = oss2.Auth(FD_OSS_ACCESS_KEY_ID, FD_OSS_ACCESS_KEY_SECRET)
+        self.bucket = oss2.Bucket(
+            auth=auth,
+            bucket_name=FD_OSS_BUCKET_NAME,
+            endpoint=FD_OSS_ENDPOINT,
+            connect_timeout=30,
+        )
+        self.oss_url_prefix = FD_OSS_URL_PREFIX
+
+    @classmethod
+    def INPUT_TYPES(cls) -> InputTypeDict:
+        return {
+            "required": {
+                "out_request_id": (
+                    IO.STRING,
+                    {
+                        "default": "unknown_request_id",
+                        "tooltip": "FD out_request_id for generation",
+                    },
+                ),
+                "prompt": (
+                    IO.STRING,
+                    {
+                        "multiline": True,
+                        "default": "",
+                        "tooltip": "Text prompt for generation",
+                    },
+                ),
+                "aspect_ratio": (
+                    ["auto", "1:1", "3:4", "9:16"],
+                    {
+                        "default": "auto",
+                        "tooltip": "Aspect ratio for generation",
+                    },
+                ),
+            },
+            "optional": {
+                "images": (
+                    IO.IMAGE,
+                    {
+                        "default": None,
+                        "tooltip": "Optional image(s) to edit with. To include multiple images, you can use the Batch Images node.",
+                    },
+                ),
+                "seed": (
+                    IO.INT,
+                    {
+                        "default": 42,
+                        "min": 0,
+                        "max": 2 ** 32 - 1,
+                        "tooltip": "Random seed for generation.",
+                    },
+                ),
+                "strength": (
+                    "FLOAT",
+                    {
+                        "default": 0.25,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.01,
+                        "display": "number",
+                        "tooltip": "How strongly to edit the input image.",
+                    },
+                ),
+                "guidance_scale": (
+                    "FLOAT",
+                    {
+                        "default": 0.0,
+                        "min": 0.0,
+                        "max": 20.0,
+                        "step": 0.1,
+                        "display": "number",
+                        "tooltip": "Classifier-free guidance scale.",
+                    },
+                ),
+                "num_inference_steps": (
+                    IO.INT,
+                    {
+                        "default": 9,
+                        "min": 1,
+                        "max": 100,
+                        "tooltip": "Number of denoising steps.",
+                    },
+                ),
+                "num_images": (
+                    IO.INT,
+                    {
+                        "default": 1,
+                        "min": 1,
+                        "max": 8,
+                        "tooltip": "Number of output images.",
+                    },
+                ),
+                "resolution": (
+                    IO.COMBO,
+                    {
+                        "options": ["1K", "2K"],
+                        "default": "1K",
+                        "tooltip": "Output image size.",
+                    },
+                ),
+            },
+            "hidden": {
+                "auth_token": "AUTH_TOKEN_COMFY_ORG",
+                "comfy_api_key": "API_KEY_COMFY_ORG",
+                "unique_id": "UNIQUE_ID",
+            },
+        }
+
+    RETURN_TYPES = (IO.IMAGE, IO.STRING)
+    FUNCTION = "api_call"
+    CATEGORY = "image/generation"
+    DESCRIPTION = "Edit images synchronously via Z-Image-Turbo API."
+    API_NODE = True
+
+    def api_call(
+        self,
+        out_request_id: str,
+        prompt: str,
+        aspect_ratio: str,
+        images: Optional[IO.IMAGE] = None,
+        seed: int = 42,
+        strength: float = 0.25,
+        guidance_scale: float = 0.0,
+        num_inference_steps: int = 9,
+        num_images: int = 1,
+        resolution: str = "1K",
+        **kwargs,
+    ):
+        body = {
+            "out_request_id": out_request_id,
+            "prompt": prompt,
+            "seed": seed,
+            "ratio": aspect_ratio,
+            "size": resolution,
+            "strength": strength,
+            "guidance_scale": guidance_scale,
+            "num_inference_steps": num_inference_steps,
+            "num_images": num_images,
+        }
+        if images is not None:
+            batch_size = images.shape[0]
+            image_url_list = []
+            for i in range(batch_size):
+                single_image = images[i : i + 1]
+                scaled_image = single_image.squeeze()
+                image_np = (scaled_image.numpy() * 255).astype(np.uint8)
+                img = Image.fromarray(image_np)
+                img_byte_arr = BytesIO()
+                img.save(img_byte_arr, format="PNG")
+                img_byte_arr = img_byte_arr.getvalue()
+                file_oss_path = f"{FD_OSS_URL_PATH_PREFIX_FLUX}/{bytes_calculate_hex_md5(img_byte_arr)}.png"
+                self.bucket.put_object(file_oss_path, img_byte_arr)
+                print(f"upload {file_oss_path}")
+                oss_file_url = f"{self.oss_url_prefix}{file_oss_path}"
+                image_url_list.append(oss_file_url)
+            body["images"] = image_url_list
+
+        if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
+            try:
+                print("Sending z_image_turbo webhook message...")
+                webhook_send(FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL, {
+                    "z_image_turbo_request": {
+                        "service_url": FD_Z_IMAGE_TURBO_URL,
+                        "request": body,
+                    }
+                })
+            except Exception:
+                pass
+
+        logger.info(f"Calling Z-Image-Turbo API with {body}")
+        try:
+            response = requests.post(FD_Z_IMAGE_TURBO_URL, auth=(FD_Z_IMAGE_TURBO_USERNAME, FD_Z_IMAGE_TURBO_PASSWORD), json=body)
+            response.raise_for_status()
+            if response.status_code != 200:
+                raise Exception(f"Failed to call API: {response.content}")
+            result = response.json()
+            logger.info(f"Z-Image-Turbo API response: {result}")
+            result_url = result["urls"][0]
+        except Exception:
+            traceback.print_exc()
+            raise
+
+        if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
+            try:
+                print("Sending z_image_turbo webhook message...")
+                webhook_send(FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL, {
+                    "z_image_turbo_full": {
+                        "request": body,
+                        "response": result,
+                    }
+                })
+            except Exception:
+                pass
+        image_content = requests.get(result_url).content
+        image_bytesio = BytesIO(image_content)
+        output_image = bytesio_to_image_tensor(image_bytesio)
+        return (output_image, result_url)
 
 
 class FD_SeedreamImage(ComfyNodeABC):
@@ -653,6 +862,7 @@ NODE_CLASS_MAPPINGS = {
     "FD_imgToText_Doubao": FD_imgToText_Doubao,
     "FD_GeminiImage": FD_GeminiImage,
     "FD_Flux2KleinGenImage": FD_Flux2KleinGenImage,
+    "FD_ZImageTurboGenImage": FD_ZImageTurboGenImage,
     "FD_SeedreamImage": FD_SeedreamImage,
 }
 
@@ -663,5 +873,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FD_imgToText_Doubao": "FD Image to Text (Doubao)",
     "FD_GeminiImage": "FD Gemini Image",
     "FD_Flux2KleinGenImage": "FD Flux2Klein Gen Image",
+    "FD_ZImageTurboGenImage": "FD Z-Image-Turbo Gen Image",
     "FD_SeedreamImage": "FD Seedream Image",
 }
