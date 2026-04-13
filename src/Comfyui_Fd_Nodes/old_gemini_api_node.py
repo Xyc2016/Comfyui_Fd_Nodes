@@ -76,6 +76,7 @@ class GeminiImageModel(str, Enum):
 
     gemini_2_5_flash_image_preview = "google/gemini-2.5-flash-image-preview"
     gemini_3_pro_image_preview = "google/gemini-3-pro-image-preview"
+    gemini_3_pro_image_preview_official = "google/gemini-3-pro-image-preview-official"
     gemini_3_1_flash_image_preview = "google/gemini-3.1-flash-image-preview"
 
 
