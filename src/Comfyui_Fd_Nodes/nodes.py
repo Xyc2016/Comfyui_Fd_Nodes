@@ -917,6 +917,7 @@ class FD_GTPImage(ComfyNodeABC):
             "prompt": prompt.strip(),
             "size": size,
             "user": out_request_id,
+            "quality": "medium"
         }
 
         multipart_files = []
