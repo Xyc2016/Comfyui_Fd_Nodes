@@ -54,21 +54,32 @@ FD_REMOVE_WATERMARK_SERVICE_URL = os.getenv("FD_REMOVE_WATERMARK_SERVICE_URL", "
 
 
 def _resolution_to_edit_size(resolution: str, aspect_ratio: str) -> str:
-    base_size_map = {
-        "1K": 1024,
-        "2K": 2048,
-        "4K": 4096,
+    # gpt-image-2 accepts flexible sizes, but they must satisfy strict bounds:
+    # edge <= 3840, edges are multiples of 16, ratio <= 3:1,
+    # and total pixels stay within [655360, 8294400].
+    # Use fixed valid presets here so the Comfy node never emits illegal sizes.
+    size_map = {
+        "1K": {
+            "": "1024x1024",
+            "1:1": "1024x1024",
+            "3:4": "768x1024",
+            "9:16": "720x1280",
+        },
+        "2K": {
+            "": "2048x2048",
+            "1:1": "2048x2048",
+            "3:4": "1536x2048",
+            "9:16": "1152x2048",
+        },
+        "4K": {
+            "": "2880x2880",
+            "1:1": "2880x2880",
+            "3:4": "2160x2880",
+            "9:16": "2160x3840",
+        },
     }
-    base_size = base_size_map.get(resolution, 2048)
-
-    if aspect_ratio in ("", "1:1"):
-        return f"{base_size}x{base_size}"
-    if aspect_ratio == "3:4":
-        return f"{round(base_size * 3 / 4)}x{base_size}"
-    if aspect_ratio == "9:16":
-        return f"{round(base_size * 9 / 16)}x{base_size}"
-
-    return f"{base_size}x{base_size}"
+    normalized_resolution = resolution if resolution in size_map else "2K"
+    return size_map[normalized_resolution].get(aspect_ratio, size_map[normalized_resolution][""])
 
 
 def _image_tensor_to_png_bytes(image: torch.Tensor) -> bytes:
@@ -77,6 +88,24 @@ def _image_tensor_to_png_bytes(image: torch.Tensor) -> bytes:
     img_byte_arr = BytesIO()
     img.save(img_byte_arr, format="PNG")
     return img_byte_arr.getvalue()
+
+
+def _summarize_gpt_image_result(result: dict) -> dict:
+    data_items = result.get("data", [])
+    item_summaries = []
+    for item in data_items:
+        item_summaries.append(
+            {
+                "keys": sorted(key for key in item.keys() if key != "b64_json"),
+                "has_b64_json": "b64_json" in item,
+                "has_url": bool(item.get("url")),
+            }
+        )
+    return {
+        "keys": sorted(key for key in result.keys() if key != "data"),
+        "data_count": len(data_items),
+        "data_items": item_summaries,
+    }
 
 
 class FD_RemoveWatermark:
@@ -933,7 +962,7 @@ class FD_GTPImage(ComfyNodeABC):
             )
             response.raise_for_status()
             result = response.json()
-            logger.info("GPT Image API response: %s", result)
+            logger.info("GPT Image API response summary: %s", _summarize_gpt_image_result(result))
 
             first_item = result["data"][0]
             result_url = first_item.get("url", "")
@@ -944,7 +973,10 @@ class FD_GTPImage(ComfyNodeABC):
             elif first_item.get("b64_json"):
                 image_bytesio = BytesIO(base64.b64decode(first_item["b64_json"]))
             else:
-                raise ValueError(f"GPT Image API returned no usable image payload: {result}")
+                raise ValueError(
+                    "GPT Image API returned no usable image payload: "
+                    f"{_summarize_gpt_image_result(result)}"
+                )
         except requests.exceptions.Timeout as exc:
             traceback.print_exc()
             raise GenImageServiceError("TIMEOUT") from exc
