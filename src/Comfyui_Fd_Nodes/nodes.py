@@ -879,11 +879,13 @@ class FD_GTPImage(ComfyNodeABC):
 
         if images is None:
             raise ValueError("FD_GTPImage requires at least one input image.")
+        if not prompt or not prompt.strip():
+            raise ValueError("FD_GTPImage requires a non-empty prompt.")
 
         size = _resolution_to_edit_size(resolution or "2K", aspect_ratio)
         data = {
             "model": model,
-            "prompt": prompt,
+            "prompt": prompt.strip(),
             "size": size,
             "user": out_request_id,
         }
@@ -943,9 +945,27 @@ class FD_GTPImage(ComfyNodeABC):
                 image_bytesio = BytesIO(base64.b64decode(first_item["b64_json"]))
             else:
                 raise ValueError(f"GPT Image API returned no usable image payload: {result}")
-        except Exception:
+        except requests.exceptions.Timeout as exc:
             traceback.print_exc()
-            raise GenImageServiceError("TIMEOUT")
+            raise GenImageServiceError("TIMEOUT") from exc
+        except requests.exceptions.HTTPError as exc:
+            response = exc.response
+            status_code = response.status_code if response is not None else "unknown"
+            response_text = response.text if response is not None else str(exc)
+            logger.error(
+                "GPT Image API HTTP error status=%s response=%s",
+                status_code,
+                response_text,
+            )
+            raise GenImageServiceError(
+                f"HTTP {status_code} from GPT Image API: {response_text}"
+            ) from exc
+        except requests.exceptions.RequestException as exc:
+            traceback.print_exc()
+            raise GenImageServiceError(f"REQUEST_ERROR: {exc}") from exc
+        except Exception as exc:
+            traceback.print_exc()
+            raise GenImageServiceError(f"UNEXPECTED_ERROR: {exc}") from exc
 
         if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
             try:
