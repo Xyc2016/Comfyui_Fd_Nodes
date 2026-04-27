@@ -959,7 +959,7 @@ class FD_GTPImage(ComfyNodeABC):
                 headers=headers,
                 data=data,
                 files=multipart_files,
-                timeout=300,
+                timeout=600,
             )
             response.raise_for_status()
             result = response.json()
