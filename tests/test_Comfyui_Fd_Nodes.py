@@ -3,6 +3,7 @@
 """Tests for `Comfyui_Fd_Nodes` package."""
 
 import pytest
+from src.Comfyui_Fd_Nodes.gpt_image_edit_node import GPTImageEditNode
 from src.Comfyui_Fd_Nodes.nodes import (
     FD_GTPImage,
     Example,
@@ -10,6 +11,10 @@ from src.Comfyui_Fd_Nodes.nodes import (
     NODE_DISPLAY_NAME_MAPPINGS,
     _resolution_to_edit_size,
 )
+from src.Comfyui_Fd_Nodes.prompt_nodes import EcommercePromptGenerator, PromptListSelector
+from src.Comfyui_Fd_Nodes.zhiyi_image_text_node import ZhiYiImageTextNode
+from src.Comfyui_Fd_Nodes.zhiyi_image_to_image_node import ZhiYiImageToImageNode
+from src.Comfyui_Fd_Nodes.zhiyi_text_node import ZhiYiTextGenNode
 
 @pytest.fixture
 def example_node():
@@ -65,3 +70,17 @@ def test_fd_gtp_image_requires_input_image():
             images=None,
             aspect_ratio="",
         )
+
+
+def test_new_nodes_hide_base_url_and_api_key_inputs():
+    """New custom nodes should read API config from project settings instead of exposing it in the UI."""
+    assert {"base_url", "api_key"}.isdisjoint(GPTImageEditNode.INPUT_TYPES()["required"])
+    assert {"api_url", "api_key"}.isdisjoint(EcommercePromptGenerator.INPUT_TYPES()["required"])
+    assert {"base_url", "api_key"}.isdisjoint(ZhiYiImageTextNode.INPUT_TYPES()["required"])
+    assert {"base_url", "api_key"}.isdisjoint(ZhiYiImageToImageNode.INPUT_TYPES()["required"])
+    assert {"base_url", "api_key"}.isdisjoint(ZhiYiTextGenNode.INPUT_TYPES()["required"])
+
+
+def test_selector_node_never_exposed_api_inputs():
+    """PromptListSelector should remain a pure list-selection node."""
+    assert {"base_url", "api_key", "api_url"}.isdisjoint(PromptListSelector.INPUT_TYPES()["required"])

@@ -45,6 +45,11 @@ from .utils.common_util import (
     downscale_image_tensor,
 )
 from .utils.webhook import webhook_send
+from .gpt_image_edit_node import GPTImageEditNode
+from .prompt_nodes import EcommercePromptGenerator, PromptListSelector
+from .zhiyi_text_node import ZhiYiTextGenNode
+from .zhiyi_image_text_node import ZhiYiImageTextNode
+from .zhiyi_image_to_image_node import ZhiYiImageToImageNode
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1141,6 +1146,12 @@ NODE_CLASS_MAPPINGS = {
     "FD_Flux2KleinGenImage": FD_Flux2KleinGenImage,
     "FD_ZImageTurboGenImage": FD_ZImageTurboGenImage,
     "FD_SeedreamImage": FD_SeedreamImage,
+    "GPTImageEdit": GPTImageEditNode,
+    "MaoziEcommercePromptGenerator": EcommercePromptGenerator,
+    "MaoziPromptListSelector": PromptListSelector,
+    "ZhiYiImageTextNode": ZhiYiImageTextNode,
+    "ZhiYiImageToImageNode": ZhiYiImageToImageNode,
+    "ZhiYiTextGenNode": ZhiYiTextGenNode,
 }
 
 # A dictionary that contains the friendly/humanly readable titles for the nodes
@@ -1153,4 +1164,10 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FD_Flux2KleinGenImage": "FD Flux2Klein Gen Image",
     "FD_ZImageTurboGenImage": "FD Z-Image-Turbo Gen Image",
     "FD_SeedreamImage": "FD Seedream Image",
+    "GPTImageEdit": "GPT Image Edit (gpt-image-2)",
+    "MaoziEcommercePromptGenerator": "猫子提示词节点-详情页生成器",
+    "MaoziPromptListSelector": "猫子提示词节点-列表选择器",
+    "ZhiYiImageTextNode": "知衣-图生文",
+    "ZhiYiImageToImageNode": "知衣-图生图",
+    "ZhiYiTextGenNode": "知衣-文生文",
 }
