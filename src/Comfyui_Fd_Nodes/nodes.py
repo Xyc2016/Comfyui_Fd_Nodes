@@ -51,8 +51,9 @@ from .zhiyi_text_node import ZhiYiTextGenNode
 from .zhiyi_image_text_node import ZhiYiImageTextNode
 from .zhiyi_image_to_image_node import ZhiYiImageToImageNode
 from .toggle import NodeToggleByID
+from .utils.logging_utils import configure_default_logging
 
-logging.basicConfig(level=logging.INFO)
+configure_default_logging()
 logger = logging.getLogger(__name__)
 
 

@@ -1,10 +1,15 @@
 import requests
 import json
 import base64
+import logging
 import numpy as np
 from PIL import Image
 import io
 from .config_manager import load_config
+from .utils.logging_utils import configure_default_logging
+
+configure_default_logging()
+logger = logging.getLogger(__name__)
 
 
 class ZhiYiImageTextNode:

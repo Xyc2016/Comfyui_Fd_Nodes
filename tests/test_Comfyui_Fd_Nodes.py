@@ -2,6 +2,9 @@
 
 """Tests for `Comfyui_Fd_Nodes` package."""
 
+import json
+import logging
+
 import pytest
 from src.Comfyui_Fd_Nodes.gpt_image_edit_node import GPTImageEditNode
 from src.Comfyui_Fd_Nodes.nodes import (
@@ -12,9 +15,17 @@ from src.Comfyui_Fd_Nodes.nodes import (
     _resolution_to_edit_size,
 )
 from src.Comfyui_Fd_Nodes.prompt_nodes import EcommercePromptGenerator, PromptListSelector
+from src.Comfyui_Fd_Nodes import zhiyi_image_text_node as zhiyi_image_text_module
+from src.Comfyui_Fd_Nodes import zhiyi_image_to_image_node as zhiyi_image_to_image_module
+from src.Comfyui_Fd_Nodes import zhiyi_text_node as zhiyi_text_module
 from src.Comfyui_Fd_Nodes.zhiyi_image_text_node import ZhiYiImageTextNode
 from src.Comfyui_Fd_Nodes.zhiyi_image_to_image_node import ZhiYiImageToImageNode
 from src.Comfyui_Fd_Nodes.zhiyi_text_node import ZhiYiTextGenNode
+from src.Comfyui_Fd_Nodes.utils.logging_utils import (
+    DEFAULT_LOG_DATE_FORMAT,
+    DEFAULT_LOG_FORMAT,
+    configure_default_logging,
+)
 
 @pytest.fixture
 def example_node():
@@ -84,3 +95,258 @@ def test_new_nodes_hide_base_url_and_api_key_inputs():
 def test_selector_node_never_exposed_api_inputs():
     """PromptListSelector should remain a pure list-selection node."""
     assert {"base_url", "api_key", "api_url"}.isdisjoint(PromptListSelector.INPUT_TYPES()["required"])
+
+
+def test_zhiyi_image_to_image_exposes_out_request_id():
+    """ZhiYiImageToImageNode should expose out_request_id in the UI inputs."""
+    required_inputs = ZhiYiImageToImageNode.INPUT_TYPES()["required"]
+
+    assert "out_request_id" in required_inputs
+    assert required_inputs["out_request_id"][1]["default"] == "default"
+
+
+def test_zhiyi_image_to_image_request_uses_user_and_logs_without_images(monkeypatch):
+    """The API request should send out_request_id as user and log only non-image inputs."""
+    node = ZhiYiImageToImageNode()
+    captured = {}
+
+    class DummyResponse:
+        ok = True
+        text = '{"ok": true}'
+
+        def json(self):
+            return {"ok": True}
+
+    def fake_post(url, headers, data, timeout):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["payload"] = json.loads(data)
+        captured["timeout"] = timeout
+        return DummyResponse()
+
+    def fake_extract(_result):
+        return "data:image/png;base64,ZmFrZQ=="
+
+    def fake_base64_to_tensor(data_url):
+        captured["data_url"] = data_url
+        return "fake-tensor"
+
+    def fake_logger_info(message, payload):
+        captured["log_message"] = message
+        captured["log_payload"] = payload
+
+    monkeypatch.setattr(zhiyi_image_to_image_module.requests, "post", fake_post)
+    monkeypatch.setattr(node, "_extract_image_from_response", fake_extract)
+    monkeypatch.setattr(node, "_base64_to_tensor", fake_base64_to_tensor)
+    monkeypatch.setattr(zhiyi_image_to_image_module.logger, "info", fake_logger_info)
+
+    messages = [
+        {"role": "system", "content": [{"type": "text", "text": "system prompt"}]},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "user prompt"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}},
+            ],
+        },
+    ]
+
+    result = node._single_request(
+        url="https://example.com/v1/chat/completions",
+        api_key="secret",
+        out_request_id="req-123",
+        messages=messages,
+        model="custom-model",
+        aspect_ratio="1:1",
+        image_size="4K",
+        seed=42,
+    )
+
+    assert result == "fake-tensor"
+    assert captured["payload"]["user"] == "req-123"
+    assert captured["payload"]["seed"] == 42
+    assert captured["log_message"] == "Calling ZhiYi image-to-image API with payload=%s"
+    assert captured["log_payload"]["user"] == "req-123"
+    assert captured["log_payload"]["messages"] == [
+        {"role": "system", "text": "system prompt"},
+        {"role": "user", "text": "user prompt", "image_count": 1},
+    ]
+    assert "data:image/png;base64,AAA" not in json.dumps(captured["log_payload"], ensure_ascii=False)
+
+
+def test_zhiyi_image_text_exposes_out_request_id():
+    """ZhiYiImageTextNode should expose out_request_id in the UI inputs."""
+    required_inputs = ZhiYiImageTextNode.INPUT_TYPES()["required"]
+
+    assert "out_request_id" in required_inputs
+    assert required_inputs["out_request_id"][1]["default"] == "default"
+
+
+def test_zhiyi_text_gen_exposes_out_request_id():
+    """ZhiYiTextGenNode should expose out_request_id in the UI inputs."""
+    required_inputs = ZhiYiTextGenNode.INPUT_TYPES()["required"]
+
+    assert "out_request_id" in required_inputs
+    assert required_inputs["out_request_id"][1]["default"] == "default"
+
+
+def test_zhiyi_image_text_request_uses_user_and_logs_without_images(monkeypatch):
+    """The image-text API request should send out_request_id as user and keep images out of logs."""
+    node = ZhiYiImageTextNode()
+    captured = {}
+
+    class DummyResponse:
+        text = '{"choices":[{"message":{"content":"hello"}}]}'
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "hello"}}]}
+
+    def fake_post(url, headers, data, timeout):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["payload"] = json.loads(data)
+        captured["timeout"] = timeout
+        return DummyResponse()
+
+    def fake_image_tensor_to_base64(_image):
+        return "AAA"
+
+    def fake_logger_info(message, payload):
+        captured["log_message"] = message
+        captured["log_payload"] = payload
+
+    monkeypatch.setattr(zhiyi_image_text_module, "load_config", lambda: {"base_url": "https://example.com", "api_key": "secret"})
+    monkeypatch.setattr(zhiyi_image_text_module.requests, "post", fake_post)
+    monkeypatch.setattr(node, "_image_tensor_to_base64", fake_image_tensor_to_base64)
+    monkeypatch.setattr(zhiyi_image_text_module.logger, "info", fake_logger_info)
+
+    result = node.generate(
+        out_request_id="req-234",
+        image="fake-image",
+        prompt="describe this image",
+        node_switch=0,
+        system_prompt="system prompt",
+        temperature=0.2,
+        max_tokens=256,
+    )
+
+    assert result == ("hello",)
+    assert captured["payload"]["user"] == "req-234"
+    assert captured["log_message"] == "Calling ZhiYi image-to-text API with payload=%s"
+    assert captured["log_payload"]["messages"] == [
+        {"role": "system", "text": "system prompt"},
+        {"role": "user", "text": "describe this image", "image_count": 1},
+    ]
+    assert "data:image/png;base64,AAA" not in json.dumps(captured["log_payload"], ensure_ascii=False)
+
+
+def test_zhiyi_text_gen_request_uses_user_and_logs_payload(monkeypatch):
+    """The text API request should send out_request_id as user and log the payload."""
+    node = ZhiYiTextGenNode()
+    captured = {}
+
+    class DummyResponse:
+        text = '{"choices":[{"message":{"content":"hello text"}}]}'
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "hello text"}}]}
+
+    def fake_post(url, headers, data, timeout):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["payload"] = json.loads(data)
+        captured["timeout"] = timeout
+        return DummyResponse()
+
+    def fake_logger_info(message, payload):
+        captured["log_message"] = message
+        captured["log_payload"] = payload
+
+    monkeypatch.setattr(zhiyi_text_module, "load_config", lambda: {"base_url": "https://example.com", "api_key": "secret"})
+    monkeypatch.setattr(zhiyi_text_module.requests, "post", fake_post)
+    monkeypatch.setattr(zhiyi_text_module.logger, "info", fake_logger_info)
+
+    result = node.generate(
+        out_request_id="req-345",
+        prompt="say hello",
+        node_switch=0,
+        system_prompt="system prompt",
+        temperature=0.3,
+        max_tokens=128,
+    )
+
+    assert result == ("hello text",)
+    assert captured["payload"]["user"] == "req-345"
+    assert captured["log_message"] == "Calling ZhiYi text API with payload=%s"
+    assert captured["log_payload"]["messages"] == [
+        {"role": "system", "content": [{"type": "text", "text": "system prompt"}]},
+        {"role": "user", "content": [{"type": "text", "text": "say hello"}]},
+    ]
+
+
+def test_configure_default_logging_installs_timestamp_format(monkeypatch):
+    """Default logging should include timestamps when no root handlers are configured."""
+    captured = {}
+
+    class FakeRootLogger:
+        handlers = []
+
+    def fake_get_logger(name=None):
+        if name is None:
+            return FakeRootLogger()
+        raise AssertionError("Only the root logger should be requested")
+
+    def fake_basic_config(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr("src.Comfyui_Fd_Nodes.utils.logging_utils.logging.getLogger", fake_get_logger)
+    monkeypatch.setattr("src.Comfyui_Fd_Nodes.utils.logging_utils.logging.basicConfig", fake_basic_config)
+
+    configure_default_logging()
+
+    assert captured["level"] == 20
+    assert captured["format"] == DEFAULT_LOG_FORMAT
+    assert captured["datefmt"] == DEFAULT_LOG_DATE_FORMAT
+
+
+def test_configure_default_logging_upgrades_existing_handler_without_timestamp(monkeypatch):
+    """Existing root handlers without timestamps should be upgraded to the default formatter."""
+
+    class FakeHandler:
+        def __init__(self):
+            self.formatter = logging.Formatter("%(message)s")
+
+        def setFormatter(self, formatter):
+            self.formatter = formatter
+
+    class FakeRootLogger:
+        def __init__(self):
+            self.handlers = [FakeHandler()]
+
+    fake_root_logger = FakeRootLogger()
+
+    def fake_get_logger(name=None):
+        if name is None:
+            return fake_root_logger
+        raise AssertionError("Only the root logger should be requested")
+
+    basic_config_called = False
+
+    def fake_basic_config(**kwargs):
+        nonlocal basic_config_called
+        basic_config_called = True
+
+    monkeypatch.setattr("src.Comfyui_Fd_Nodes.utils.logging_utils.logging.getLogger", fake_get_logger)
+    monkeypatch.setattr("src.Comfyui_Fd_Nodes.utils.logging_utils.logging.basicConfig", fake_basic_config)
+
+    configure_default_logging()
+
+    assert basic_config_called is False
+    assert fake_root_logger.handlers[0].formatter._fmt == DEFAULT_LOG_FORMAT
+    assert fake_root_logger.handlers[0].formatter.datefmt == DEFAULT_LOG_DATE_FORMAT

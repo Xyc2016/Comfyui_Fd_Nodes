@@ -1,7 +1,11 @@
 import requests
 import json
+import logging
 from .config_manager import load_config
+from .utils.logging_utils import configure_default_logging
 
+configure_default_logging()
+logger = logging.getLogger(__name__)
 
 class ZhiYiTextGenNode:
     """知依文生文节点 - 调用 Gemini 模型生成文本"""
@@ -91,7 +95,6 @@ class ZhiYiTextGenNode:
             response.raise_for_status()
             result = response.json()
             text = result["choices"][0]["message"]["content"]
-            # content 可能是字符串或列表
             if isinstance(text, list):
                 text = "".join(
                     part.get("text", "") for part in text if isinstance(part, dict)

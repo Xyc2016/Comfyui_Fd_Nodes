@@ -27,10 +27,11 @@ from .utils.common_util import (
     bytesio_to_image_tensor,
     downscale_image_tensor,
 )
+from .utils.logging_utils import configure_default_logging
 from .utils.webhook import webhook_send
 
+configure_default_logging()
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
 
 class GenImageServiceError(Exception):

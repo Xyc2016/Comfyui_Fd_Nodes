@@ -2,15 +2,24 @@ import requests
 import json
 import base64
 import random
+import logging
 import numpy as np
 from PIL import Image
 import io
 import torch
 from .config_manager import load_config
+from .utils.logging_utils import configure_default_logging
+from .config import (
+    FD_LITELLM_API_KEY,
+    FD_LITELLM_BASE_URL,
+)
+
+configure_default_logging()
+logger = logging.getLogger(__name__)
 
 
 class ZhiYiImageToImageNode:
-    """知衣图生图节点 - 最多6张输入图片，batch_size 控制重复请求次数"""
+    """知衣图生图节点 - 最多6张输入图片，batch_size 控制重复请求次数，支持提示词列表并发"""
 
     MODELS = [
         "gemini-3-pro-image-preview",
@@ -55,6 +64,11 @@ class ZhiYiImageToImageNode:
                     "step": 1,
                     "display": "number",
                 }),
+                "out_request_id": ("STRING", {
+                    "default": "default",
+                    "tooltip": "FD out_request_id for generation",
+                }),
+                "prompt_list": ("LIST",),
                 "image_2": ("IMAGE",),
                 "image_3": ("IMAGE",),
                 "image_4": ("IMAGE",),
@@ -115,16 +129,18 @@ class ZhiYiImageToImageNode:
 
     MODELS_NO_SEED = {"gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview"}
 
-    def _single_request(self, url, api_key, messages, model, aspect_ratio, image_size, seed):
+    def _single_request(self, url, api_key, messages, model, aspect_ratio, image_size, seed, out_request_id="default"):
         payload = {
             "stream": False,
             "model": model,
             "messages": messages,
             "imageConfig": {"aspect_ratio": aspect_ratio, "image_size": image_size},
             "modalities": ["image"],
+            "user": out_request_id,
         }
         if model not in self.MODELS_NO_SEED:
             payload["seed"] = seed
+        print(f"[知衣图生图] 发送请求: model={model}, aspect_ratio={aspect_ratio}, image_size={image_size}, seed={seed}, out_request_id={out_request_id}, url={url}")
         response = requests.post(
             url=url,
             headers={
@@ -143,24 +159,7 @@ class ZhiYiImageToImageNode:
             raise RuntimeError(f"解析响应失败: {e}\n原始响应: {response.text[:500]}")
         return self._base64_to_tensor(out_data_url)
 
-    def generate(self, image_1, prompt, model, aspect_ratio, image_size,
-                 batch_size=1, seed_mode="随机种子", seed=0, node_switch=1,
-                 image_2=None, image_3=None, image_4=None,
-                 image_5=None, image_6=None, system_prompt=""):
-        if node_switch == 1:
-            # 返回原图和 seed=0，保持输出类型一致
-            return (image_1, 0)
-
-        cfg = load_config()
-        base_url = cfg["base_url"]
-        api_key = cfg["api_key"]
-        base_url = base_url.rstrip("/")
-        url = f"{base_url}/v1/chat/completions"
-
-        actual_seed = random.randint(0, 2147483647) if seed_mode == "随机种子" else seed
-
-        images = [t for t in [image_1, image_2, image_3, image_4, image_5, image_6] if t is not None]
-
+    def _build_messages(self, prompt, image_b64_list, system_prompt):
         messages = []
         if system_prompt.strip():
             messages.append({
@@ -168,18 +167,72 @@ class ZhiYiImageToImageNode:
                 "content": [{"type": "text", "text": system_prompt}],
             })
         user_content = [{"type": "text", "text": prompt}]
-        for img_tensor in images:
-            b64 = self._tensor_to_base64(img_tensor)
+        for b64 in image_b64_list:
             user_content.append({
                 "type": "image_url",
                 "image_url": {"url": f"data:image/png;base64,{b64}"},
             })
         messages.append({"role": "user", "content": user_content})
+        return messages
 
-        results = []
-        for i in range(batch_size):
-            batch_seed = actual_seed + i if seed_mode == "固定种子" else random.randint(0, 2147483647)
-            tensor = self._single_request(url, api_key, messages, model, aspect_ratio, image_size, batch_seed)
-            results.append(tensor)
+    def _run_concurrent(self, tasks, label="任务"):
+        """tasks: list of (idx, callable, args)，并发执行，返回 {idx: result}"""
+        results = [None] * len(tasks)
+        with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
+            futures = {
+                executor.submit(fn, *args): idx
+                for idx, fn, args in tasks
+            }
+            for future in as_completed(futures):
+                idx = futures[future]
+                try:
+                    results[idx] = future.result()
+                except Exception as e:
+                    print(f"[知衣图生图] {label} 第 {idx + 1} 个失败，已跳过: {type(e).__name__}: {e}")
+                    traceback.print_exc()
+        return results
 
-        return (torch.cat(results, dim=0), actual_seed)
+    def generate(self, image_1, prompt, model, aspect_ratio, image_size,
+                 batch_size=1, seed_mode="随机种子", seed=0,
+                 node_switch=0, out_request_id="default", prompt_list=None,
+                 image_2=None, image_3=None, image_4=None,
+                 image_5=None, image_6=None, system_prompt=""):
+        if node_switch == 1:
+            empty = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
+            return (empty, 0)
+
+        cfg = load_config()
+        base_url = (FD_LITELLM_BASE_URL or cfg["base_url"]).rstrip("/")
+        api_key = FD_LITELLM_API_KEY or cfg["api_key"]
+        url = f"{base_url}/v1/chat/completions"
+
+        actual_seed = random.randint(0, 2147483647) if seed_mode == "随机种子" else seed
+
+        # 预先编码所有图片（共享，避免重复编码）
+        image_tensors = [t for t in [image_1, image_2, image_3, image_4, image_5, image_6] if t is not None]
+        image_b64_list = [self._tensor_to_base64(t) for t in image_tensors]
+
+        # 有效提示词列表
+        prompts = [p for p in (prompt_list or []) if isinstance(p, str) and p.strip()]
+        if not prompts:
+            prompts = [prompt]
+
+        total = len(prompts) * batch_size
+        tasks = []
+        task_idx = 0
+        for p_idx, p in enumerate(prompts):
+            messages = self._build_messages(p, image_b64_list, system_prompt)
+            for b_idx in range(batch_size):
+                s = (actual_seed + p_idx * batch_size + b_idx) if seed_mode == "固定种子" else random.randint(0, 2147483647)
+                tasks.append((task_idx, self._single_request, (url, api_key, messages, model, aspect_ratio, image_size, s, out_request_id)))
+                task_idx += 1
+
+        print(f"[知衣图生图] 并发发送 {total} 个请求（{len(prompts)} 条提示词 × batch_size {batch_size}）")
+        results = self._run_concurrent(tasks, label="请求")
+
+        successful = [r for r in results if r is not None]
+        if not successful:
+            raise RuntimeError("所有请求均失败，无图片返回")
+
+        print(f"[知衣图生图] 成功 {len(successful)}/{total}")
+        return (torch.cat(successful, dim=0), actual_seed)
