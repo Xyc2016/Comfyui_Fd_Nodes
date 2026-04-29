@@ -16,6 +16,13 @@ class ZhiYiTextGenNode:
                 }),
             },
             "optional": {
+                "node_switch": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 1,
+                    "step": 1,
+                    "display": "number",
+                }),
                 "system_prompt": ("STRING", {
                     "default": "",
                     "multiline": True,
@@ -41,7 +48,11 @@ class ZhiYiTextGenNode:
     CATEGORY = "知衣/文生文"
     OUTPUT_NODE = False
 
-    def generate(self, prompt, system_prompt="", temperature=0.7, max_tokens=2048):
+    def generate(self, prompt, node_switch=1,
+                 system_prompt="", temperature=0.7, max_tokens=2048):
+        if node_switch == 1:
+            return ("",)
+
         cfg = load_config()
         base_url = cfg["base_url"]
         api_key = cfg["api_key"]

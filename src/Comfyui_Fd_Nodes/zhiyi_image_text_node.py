@@ -21,6 +21,13 @@ class ZhiYiImageTextNode:
                 }),
             },
             "optional": {
+                "node_switch": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 1,
+                    "step": 1,
+                    "display": "number",
+                }),
                 "system_prompt": ("STRING", {
                     "default": "",
                     "multiline": True,
@@ -47,15 +54,17 @@ class ZhiYiImageTextNode:
     OUTPUT_NODE = False
 
     def _image_tensor_to_base64(self, image_tensor):
-        # ComfyUI IMAGE: shape (B, H, W, C), float32, 0~1
         arr = (image_tensor[0].numpy() * 255).clip(0, 255).astype(np.uint8)
         pil_img = Image.fromarray(arr)
         buf = io.BytesIO()
         pil_img.save(buf, format="PNG")
         return base64.b64encode(buf.getvalue()).decode("utf-8")
 
-    def generate(self, image, prompt,
+    def generate(self, image, prompt, node_switch=1,
                  system_prompt="", temperature=0.7, max_tokens=2048):
+        if node_switch == 1:
+            return ("",)
+
         cfg = load_config()
         base_url = cfg["base_url"]
         api_key = cfg["api_key"]

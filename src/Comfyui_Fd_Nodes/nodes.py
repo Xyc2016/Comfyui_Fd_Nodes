@@ -50,6 +50,7 @@ from .prompt_nodes import EcommercePromptGenerator, PromptListSelector
 from .zhiyi_text_node import ZhiYiTextGenNode
 from .zhiyi_image_text_node import ZhiYiImageTextNode
 from .zhiyi_image_to_image_node import ZhiYiImageToImageNode
+from .toggle import NodeToggleByID
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1152,6 +1153,7 @@ NODE_CLASS_MAPPINGS = {
     "ZhiYiImageTextNode": ZhiYiImageTextNode,
     "ZhiYiImageToImageNode": ZhiYiImageToImageNode,
     "ZhiYiTextGenNode": ZhiYiTextGenNode,
+    "NodeToggleByID": NodeToggleByID,
 }
 
 # A dictionary that contains the friendly/humanly readable titles for the nodes
@@ -1170,4 +1172,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ZhiYiImageTextNode": "知衣-图生文",
     "ZhiYiImageToImageNode": "知衣-图生图",
     "ZhiYiTextGenNode": "知衣-文生文",
+    "NodeToggleByID": "节点开关 (按ID)",
 }

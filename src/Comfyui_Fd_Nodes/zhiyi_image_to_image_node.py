@@ -48,6 +48,13 @@ class ZhiYiImageToImageNode:
                 }),
             },
             "optional": {
+                "node_switch": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 1,
+                    "step": 1,
+                    "display": "number",
+                }),
                 "image_2": ("IMAGE",),
                 "image_3": ("IMAGE",),
                 "image_4": ("IMAGE",),
@@ -89,28 +96,23 @@ class ZhiYiImageToImageNode:
             raise RuntimeError("内容被过滤 (content_filter)，请修改提示词或输入图片后重试")
         msg = choice["message"]
 
-        # 格式1: message.images[0].image_url.url
         if "images" in msg and msg["images"]:
             return msg["images"][0]["image_url"]["url"]
 
-        # 格式2: message.content 列表中含 image_url 类型
         content = msg.get("content", [])
         if isinstance(content, list):
             for part in content:
                 if isinstance(part, dict):
                     if part.get("type") == "image_url":
                         return part["image_url"]["url"]
-                    # 格式3: type=image, 直接含 base64
                     if part.get("type") == "image":
                         return part.get("url") or part.get("data", "")
 
-        # 格式4: content 直接是 base64 字符串
         if isinstance(content, str) and len(content) > 100:
             return content
 
         raise KeyError(f"无法从响应中提取图片，响应结构: {list(msg.keys())}")
 
-    # gemini image-preview 系列不支持 seed 参数
     MODELS_NO_SEED = {"gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview"}
 
     def _single_request(self, url, api_key, messages, model, aspect_ratio, image_size, seed):
@@ -142,9 +144,13 @@ class ZhiYiImageToImageNode:
         return self._base64_to_tensor(out_data_url)
 
     def generate(self, image_1, prompt, model, aspect_ratio, image_size,
-                 batch_size=1, seed_mode="随机种子", seed=0,
+                 batch_size=1, seed_mode="随机种子", seed=0, node_switch=1,
                  image_2=None, image_3=None, image_4=None,
                  image_5=None, image_6=None, system_prompt=""):
+        if node_switch == 1:
+            # 返回原图和 seed=0，保持输出类型一致
+            return (image_1, 0)
+
         cfg = load_config()
         base_url = cfg["base_url"]
         api_key = cfg["api_key"]
