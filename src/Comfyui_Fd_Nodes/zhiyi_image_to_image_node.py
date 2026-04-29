@@ -11,6 +11,7 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from .config_manager import load_config
 from .utils.logging_utils import configure_default_logging
+import logging
 from .config import (
     FD_LITELLM_API_KEY,
     FD_LITELLM_BASE_URL,
