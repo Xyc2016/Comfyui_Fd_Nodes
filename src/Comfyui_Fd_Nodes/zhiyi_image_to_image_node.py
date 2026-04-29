@@ -2,11 +2,13 @@ import requests
 import json
 import base64
 import random
-import logging
 import numpy as np
+import os
 from PIL import Image
 import io
 import torch
+import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from .config_manager import load_config
 from .utils.logging_utils import configure_default_logging
 from .config import (
