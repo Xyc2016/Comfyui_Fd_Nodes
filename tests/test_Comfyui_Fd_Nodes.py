@@ -98,42 +98,50 @@ def test_selector_node_never_exposed_api_inputs():
 
 
 def test_zhiyi_image_to_image_exposes_out_request_id():
-    """ZhiYiImageToImageNode should expose out_request_id in the UI inputs."""
-    required_inputs = ZhiYiImageToImageNode.INPUT_TYPES()["required"]
+    """ZhiYiImageToImageNode should expose out_request_id in the optional UI inputs."""
+    optional_inputs = ZhiYiImageToImageNode.INPUT_TYPES()["optional"]
 
-    assert "out_request_id" in required_inputs
-    assert required_inputs["out_request_id"][1]["default"] == "default"
+    assert "out_request_id" in optional_inputs
+    assert optional_inputs["out_request_id"][1]["default"] == "default"
 
 
-def test_zhiyi_image_to_image_request_uses_user_and_logs_without_images(monkeypatch):
-    """The API request should send out_request_id as user and log only non-image inputs."""
+def test_zhiyi_image_to_image_request_logs_request_and_response_without_images(monkeypatch):
+    """The image-to-image API should log request/response summaries without image payloads."""
     node = ZhiYiImageToImageNode()
-    captured = {}
+    captured_logs = []
 
     class DummyResponse:
         ok = True
-        text = '{"ok": true}'
+        status_code = 200
+        text = '{"choices":[{"finish_reason":"stop","message":{"images":[{"image_url":{"url":"https://example.com/img.png"}}]}}]}'
 
         def json(self):
-            return {"ok": True}
+            return {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "images": [
+                                {"image_url": {"url": "https://example.com/img.png"}}
+                            ]
+                        },
+                    }
+                ]
+            }
 
     def fake_post(url, headers, data, timeout):
-        captured["url"] = url
-        captured["headers"] = headers
-        captured["payload"] = json.loads(data)
-        captured["timeout"] = timeout
+        captured_logs.append(("post_payload", json.loads(data)))
         return DummyResponse()
 
     def fake_extract(_result):
         return "data:image/png;base64,ZmFrZQ=="
 
     def fake_base64_to_tensor(data_url):
-        captured["data_url"] = data_url
+        captured_logs.append(("data_url", data_url))
         return "fake-tensor"
 
-    def fake_logger_info(message, payload):
-        captured["log_message"] = message
-        captured["log_payload"] = payload
+    def fake_logger_info(message, *args):
+        captured_logs.append((message, args))
 
     monkeypatch.setattr(zhiyi_image_to_image_module.requests, "post", fake_post)
     monkeypatch.setattr(node, "_extract_image_from_response", fake_extract)
@@ -163,39 +171,31 @@ def test_zhiyi_image_to_image_request_uses_user_and_logs_without_images(monkeypa
     )
 
     assert result == "fake-tensor"
-    assert captured["payload"]["user"] == "req-123"
-    assert captured["payload"]["seed"] == 42
-    assert captured["log_message"] == "Calling ZhiYi image-to-image API with payload=%s"
-    assert captured["log_payload"]["user"] == "req-123"
-    assert captured["log_payload"]["messages"] == [
+    request_payload = next(value for key, value in captured_logs if key == "post_payload")
+    assert request_payload["user"] == "req-123"
+    assert request_payload["seed"] == 42
+
+    request_log = next(args[0] for message, args in captured_logs if message == "Calling ZhiYi image-to-image API with payload=%s")
+    assert request_log["user"] == "req-123"
+    assert request_log["messages"] == [
         {"role": "system", "text": "system prompt"},
         {"role": "user", "text": "user prompt", "image_count": 1},
     ]
-    assert "data:image/png;base64,AAA" not in json.dumps(captured["log_payload"], ensure_ascii=False)
+    assert "data:image/png;base64,AAA" not in json.dumps(request_log, ensure_ascii=False)
+
+    response_log = next(args[0] for message, args in captured_logs if message == "ZhiYi image-to-image API response summary: %s")
+    assert response_log["status_code"] == 200
+    assert response_log["choice_count"] == 1
+    assert response_log["image_count"] == 1
 
 
-def test_zhiyi_image_text_exposes_out_request_id():
-    """ZhiYiImageTextNode should expose out_request_id in the UI inputs."""
-    required_inputs = ZhiYiImageTextNode.INPUT_TYPES()["required"]
-
-    assert "out_request_id" in required_inputs
-    assert required_inputs["out_request_id"][1]["default"] == "default"
-
-
-def test_zhiyi_text_gen_exposes_out_request_id():
-    """ZhiYiTextGenNode should expose out_request_id in the UI inputs."""
-    required_inputs = ZhiYiTextGenNode.INPUT_TYPES()["required"]
-
-    assert "out_request_id" in required_inputs
-    assert required_inputs["out_request_id"][1]["default"] == "default"
-
-
-def test_zhiyi_image_text_request_uses_user_and_logs_without_images(monkeypatch):
-    """The image-text API request should send out_request_id as user and keep images out of logs."""
+def test_zhiyi_image_text_request_logs_request_and_response_without_images(monkeypatch):
+    """The image-text API should log request/response summaries without image payloads."""
     node = ZhiYiImageTextNode()
-    captured = {}
+    captured_logs = []
 
     class DummyResponse:
+        status_code = 200
         text = '{"choices":[{"message":{"content":"hello"}}]}'
 
         def raise_for_status(self):
@@ -205,18 +205,14 @@ def test_zhiyi_image_text_request_uses_user_and_logs_without_images(monkeypatch)
             return {"choices": [{"message": {"content": "hello"}}]}
 
     def fake_post(url, headers, data, timeout):
-        captured["url"] = url
-        captured["headers"] = headers
-        captured["payload"] = json.loads(data)
-        captured["timeout"] = timeout
+        captured_logs.append(("post_payload", json.loads(data)))
         return DummyResponse()
 
     def fake_image_tensor_to_base64(_image):
         return "AAA"
 
-    def fake_logger_info(message, payload):
-        captured["log_message"] = message
-        captured["log_payload"] = payload
+    def fake_logger_info(message, *args):
+        captured_logs.append((message, args))
 
     monkeypatch.setattr(zhiyi_image_text_module, "load_config", lambda: {"base_url": "https://example.com", "api_key": "secret"})
     monkeypatch.setattr(zhiyi_image_text_module.requests, "post", fake_post)
@@ -224,7 +220,6 @@ def test_zhiyi_image_text_request_uses_user_and_logs_without_images(monkeypatch)
     monkeypatch.setattr(zhiyi_image_text_module.logger, "info", fake_logger_info)
 
     result = node.generate(
-        out_request_id="req-234",
         image="fake-image",
         prompt="describe this image",
         node_switch=0,
@@ -234,21 +229,26 @@ def test_zhiyi_image_text_request_uses_user_and_logs_without_images(monkeypatch)
     )
 
     assert result == ("hello",)
-    assert captured["payload"]["user"] == "req-234"
-    assert captured["log_message"] == "Calling ZhiYi image-to-text API with payload=%s"
-    assert captured["log_payload"]["messages"] == [
+    request_payload = next(value for key, value in captured_logs if key == "post_payload")
+    assert request_payload["model"] == "gemini-3-pro-preview"
+    request_log = next(args[0] for message, args in captured_logs if message == "Calling ZhiYi image-to-text API with payload=%s")
+    assert request_log["messages"] == [
         {"role": "system", "text": "system prompt"},
         {"role": "user", "text": "describe this image", "image_count": 1},
     ]
-    assert "data:image/png;base64,AAA" not in json.dumps(captured["log_payload"], ensure_ascii=False)
+    assert "data:image/png;base64,AAA" not in json.dumps(request_log, ensure_ascii=False)
+    response_log = next(args[0] for message, args in captured_logs if message == "ZhiYi image-to-text API response summary: %s")
+    assert response_log["status_code"] == 200
+    assert response_log["choice_count"] == 1
 
 
-def test_zhiyi_text_gen_request_uses_user_and_logs_payload(monkeypatch):
-    """The text API request should send out_request_id as user and log the payload."""
+def test_zhiyi_text_gen_request_logs_request_and_response(monkeypatch):
+    """The text API should log request/response summaries."""
     node = ZhiYiTextGenNode()
-    captured = {}
+    captured_logs = []
 
     class DummyResponse:
+        status_code = 200
         text = '{"choices":[{"message":{"content":"hello text"}}]}'
 
         def raise_for_status(self):
@@ -258,22 +258,17 @@ def test_zhiyi_text_gen_request_uses_user_and_logs_payload(monkeypatch):
             return {"choices": [{"message": {"content": "hello text"}}]}
 
     def fake_post(url, headers, data, timeout):
-        captured["url"] = url
-        captured["headers"] = headers
-        captured["payload"] = json.loads(data)
-        captured["timeout"] = timeout
+        captured_logs.append(("post_payload", json.loads(data)))
         return DummyResponse()
 
-    def fake_logger_info(message, payload):
-        captured["log_message"] = message
-        captured["log_payload"] = payload
+    def fake_logger_info(message, *args):
+        captured_logs.append((message, args))
 
     monkeypatch.setattr(zhiyi_text_module, "load_config", lambda: {"base_url": "https://example.com", "api_key": "secret"})
     monkeypatch.setattr(zhiyi_text_module.requests, "post", fake_post)
     monkeypatch.setattr(zhiyi_text_module.logger, "info", fake_logger_info)
 
     result = node.generate(
-        out_request_id="req-345",
         prompt="say hello",
         node_switch=0,
         system_prompt="system prompt",
@@ -282,12 +277,16 @@ def test_zhiyi_text_gen_request_uses_user_and_logs_payload(monkeypatch):
     )
 
     assert result == ("hello text",)
-    assert captured["payload"]["user"] == "req-345"
-    assert captured["log_message"] == "Calling ZhiYi text API with payload=%s"
-    assert captured["log_payload"]["messages"] == [
+    request_payload = next(value for key, value in captured_logs if key == "post_payload")
+    assert request_payload["model"] == "gemini-3-pro-preview"
+    request_log = next(args[0] for message, args in captured_logs if message == "Calling ZhiYi text API with payload=%s")
+    assert request_log["messages"] == [
         {"role": "system", "content": [{"type": "text", "text": "system prompt"}]},
         {"role": "user", "content": [{"type": "text", "text": "say hello"}]},
     ]
+    response_log = next(args[0] for message, args in captured_logs if message == "ZhiYi text API response summary: %s")
+    assert response_log["status_code"] == 200
+    assert response_log["choice_count"] == 1
 
 
 def test_configure_default_logging_installs_timestamp_format(monkeypatch):

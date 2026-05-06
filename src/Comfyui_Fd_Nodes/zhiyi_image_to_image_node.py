@@ -27,6 +27,8 @@ class ZhiYiImageToImageNode:
     MODELS = [
         "gemini-3-pro-image-preview",
         "gemini-3.1-flash-image-preview",
+        "gemini-2.5-flash-image-preview",
+        "gemini-3-pro-image-preview-official",
     ]
 
     ASPECT_RATIOS = ["1:1", "16:9", "9:16", "4:3", "3:4"]
@@ -107,6 +109,63 @@ class ZhiYiImageToImageNode:
         arr = np.array(pil_img).astype(np.float32) / 255.0
         return torch.from_numpy(arr).unsqueeze(0)
 
+    def _summarize_messages_for_log(self, messages):
+        summarized_messages = []
+        for message in messages:
+            summarized_message = {"role": message.get("role", "")}
+            content = message.get("content", [])
+            if isinstance(content, list):
+                text_parts = []
+                image_count = 0
+                for part in content:
+                    if not isinstance(part, dict):
+                        continue
+                    if part.get("type") == "text":
+                        text = part.get("text", "").strip()
+                        if text:
+                            text_parts.append(text)
+                    elif part.get("type") in {"image_url", "image"}:
+                        image_count += 1
+                if text_parts:
+                    summarized_message["text"] = "\n".join(text_parts)
+                if image_count:
+                    summarized_message["image_count"] = image_count
+            else:
+                summarized_message["content"] = content
+            summarized_messages.append(summarized_message)
+        return summarized_messages
+
+    def _summarize_response_for_log(self, result):
+        summary = {"keys": list(result.keys())}
+        choices = result.get("choices", [])
+        summary["choice_count"] = len(choices)
+        if not choices:
+            return summary
+
+        choice = choices[0]
+        summary["finish_reason"] = choice.get("finish_reason")
+        message = choice.get("message", {})
+        summary["message_keys"] = list(message.keys())
+
+        images = message.get("images", [])
+        if isinstance(images, list):
+            summary["image_count"] = len(images)
+
+        content = message.get("content", [])
+        if isinstance(content, list):
+            content_types = []
+            for part in content:
+                if isinstance(part, dict):
+                    part_type = part.get("type")
+                    if part_type:
+                        content_types.append(part_type)
+            if content_types:
+                summary["content_types"] = content_types
+        elif isinstance(content, str):
+            summary["content_length"] = len(content)
+
+        return summary
+
     def _extract_image_from_response(self, result):
         choice = result["choices"][0]
         if choice.get("finish_reason") == "content_filter":
@@ -143,7 +202,19 @@ class ZhiYiImageToImageNode:
         }
         if model not in self.MODELS_NO_SEED:
             payload["seed"] = seed
-        print(f"[知衣图生图] 发送请求: model={model}, aspect_ratio={aspect_ratio}, image_size={image_size}, seed={seed}, out_request_id={out_request_id}, url={url}")
+        logger.info(
+            "Calling ZhiYi image-to-image API with payload=%s",
+            {
+                "url": url,
+                "stream": payload["stream"],
+                "model": payload["model"],
+                "imageConfig": payload["imageConfig"],
+                "modalities": payload["modalities"],
+                "user": payload["user"],
+                "seed": payload.get("seed"),
+                "messages": self._summarize_messages_for_log(messages),
+            },
+        )
         response = requests.post(
             url=url,
             headers={
@@ -156,6 +227,13 @@ class ZhiYiImageToImageNode:
         if not response.ok:
             raise RuntimeError(f"API 请求失败: {response.status_code}\n{response.text[:1000]}")
         result = response.json()
+        logger.info(
+            "ZhiYi image-to-image API response summary: %s",
+            {
+                "status_code": response.status_code,
+                **self._summarize_response_for_log(result),
+            },
+        )
         try:
             out_data_url = self._extract_image_from_response(result)
         except (KeyError, IndexError) as e:
@@ -191,7 +269,13 @@ class ZhiYiImageToImageNode:
                 try:
                     results[idx] = future.result()
                 except Exception as e:
-                    print(f"[知衣图生图] {label} 第 {idx + 1} 个失败，已跳过: {type(e).__name__}: {e}")
+                    logger.warning(
+                        "[知衣图生图] %s 第 %s 个失败，已跳过: %s: %s",
+                        label,
+                        idx + 1,
+                        type(e).__name__,
+                        e,
+                    )
                     traceback.print_exc()
         return results
 
@@ -200,7 +284,7 @@ class ZhiYiImageToImageNode:
                  node_switch=0, out_request_id="default", prompt_list=None,
                  image_2=None, image_3=None, image_4=None,
                  image_5=None, image_6=None, system_prompt=""):
-        if node_switch == 1:
+        if node_switch == 0:
             empty = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
             return (empty, 0)
 
@@ -230,12 +314,17 @@ class ZhiYiImageToImageNode:
                 tasks.append((task_idx, self._single_request, (url, api_key, messages, model, aspect_ratio, image_size, s, out_request_id)))
                 task_idx += 1
 
-        print(f"[知衣图生图] 并发发送 {total} 个请求（{len(prompts)} 条提示词 × batch_size {batch_size}）")
+        logger.info(
+            "[知衣图生图] 并发发送 %s 个请求（%s 条提示词 × batch_size %s）",
+            total,
+            len(prompts),
+            batch_size,
+        )
         results = self._run_concurrent(tasks, label="请求")
 
         successful = [r for r in results if r is not None]
         if not successful:
             raise RuntimeError("所有请求均失败，无图片返回")
 
-        print(f"[知衣图生图] 成功 {len(successful)}/{total}")
+        logger.info("[知衣图生图] 成功 %s/%s", len(successful), total)
         return (torch.cat(successful, dim=0), actual_seed)

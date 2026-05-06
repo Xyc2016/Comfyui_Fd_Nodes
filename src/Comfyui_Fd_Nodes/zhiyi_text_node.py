@@ -52,6 +52,24 @@ class ZhiYiTextGenNode:
     CATEGORY = "知衣/文生文"
     OUTPUT_NODE = False
 
+    def _summarize_response_for_log(self, result):
+        summary = {"keys": list(result.keys())}
+        choices = result.get("choices", [])
+        summary["choice_count"] = len(choices)
+        if not choices:
+            return summary
+
+        message = choices[0].get("message", {})
+        summary["message_keys"] = list(message.keys())
+        content = message.get("content", [])
+        if isinstance(content, list):
+            summary["text_part_count"] = sum(
+                1 for part in content if isinstance(part, dict) and part.get("type") == "text"
+            )
+        elif isinstance(content, str):
+            summary["content_length"] = len(content)
+        return summary
+
     def generate(self, prompt, node_switch=1,
                  system_prompt="", temperature=0.7, max_tokens=2048):
         if node_switch == 1:
@@ -81,6 +99,17 @@ class ZhiYiTextGenNode:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        logger.info(
+            "Calling ZhiYi text API with payload=%s",
+            {
+                "url": url,
+                "stream": payload["stream"],
+                "model": payload["model"],
+                "temperature": payload["temperature"],
+                "max_tokens": payload["max_tokens"],
+                "messages": messages,
+            },
+        )
 
         try:
             response = requests.post(
@@ -94,6 +123,13 @@ class ZhiYiTextGenNode:
             )
             response.raise_for_status()
             result = response.json()
+            logger.info(
+                "ZhiYi text API response summary: %s",
+                {
+                    "status_code": response.status_code,
+                    **self._summarize_response_for_log(result),
+                },
+            )
             text = result["choices"][0]["message"]["content"]
             if isinstance(text, list):
                 text = "".join(

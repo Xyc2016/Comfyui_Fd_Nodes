@@ -65,6 +65,50 @@ class ZhiYiImageTextNode:
         pil_img.save(buf, format="PNG")
         return base64.b64encode(buf.getvalue()).decode("utf-8")
 
+    def _summarize_messages_for_log(self, messages):
+        summarized_messages = []
+        for message in messages:
+            summarized_message = {"role": message.get("role", "")}
+            content = message.get("content", [])
+            if isinstance(content, list):
+                text_parts = []
+                image_count = 0
+                for part in content:
+                    if not isinstance(part, dict):
+                        continue
+                    if part.get("type") == "text":
+                        text = part.get("text", "").strip()
+                        if text:
+                            text_parts.append(text)
+                    elif part.get("type") in {"image_url", "image"}:
+                        image_count += 1
+                if text_parts:
+                    summarized_message["text"] = "\n".join(text_parts)
+                if image_count:
+                    summarized_message["image_count"] = image_count
+            else:
+                summarized_message["content"] = content
+            summarized_messages.append(summarized_message)
+        return summarized_messages
+
+    def _summarize_response_for_log(self, result):
+        summary = {"keys": list(result.keys())}
+        choices = result.get("choices", [])
+        summary["choice_count"] = len(choices)
+        if not choices:
+            return summary
+
+        message = choices[0].get("message", {})
+        summary["message_keys"] = list(message.keys())
+        content = message.get("content", [])
+        if isinstance(content, list):
+            summary["text_part_count"] = sum(
+                1 for part in content if isinstance(part, dict) and part.get("type") == "text"
+            )
+        elif isinstance(content, str):
+            summary["content_length"] = len(content)
+        return summary
+
     def generate(self, image, prompt, node_switch=1,
                  system_prompt="", temperature=0.7, max_tokens=2048):
         if node_switch == 1:
@@ -100,6 +144,17 @@ class ZhiYiImageTextNode:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        logger.info(
+            "Calling ZhiYi image-to-text API with payload=%s",
+            {
+                "url": url,
+                "stream": payload["stream"],
+                "model": payload["model"],
+                "temperature": payload["temperature"],
+                "max_tokens": payload["max_tokens"],
+                "messages": self._summarize_messages_for_log(messages),
+            },
+        )
 
         try:
             response = requests.post(
@@ -113,6 +168,13 @@ class ZhiYiImageTextNode:
             )
             response.raise_for_status()
             result = response.json()
+            logger.info(
+                "ZhiYi image-to-text API response summary: %s",
+                {
+                    "status_code": response.status_code,
+                    **self._summarize_response_for_log(result),
+                },
+            )
             text = result["choices"][0]["message"]["content"]
             if isinstance(text, list):
                 text = "".join(
