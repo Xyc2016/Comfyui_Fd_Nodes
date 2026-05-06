@@ -284,7 +284,7 @@ class ZhiYiImageToImageNode:
                  node_switch=0, out_request_id="default", prompt_list=None,
                  image_2=None, image_3=None, image_4=None,
                  image_5=None, image_6=None, system_prompt=""):
-        if node_switch == 0:
+        if node_switch == 1:
             empty = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
             return (empty, 0)
 
@@ -299,8 +299,13 @@ class ZhiYiImageToImageNode:
         image_tensors = [t for t in [image_1, image_2, image_3, image_4, image_5, image_6] if t is not None]
         image_b64_list = [self._tensor_to_base64(t) for t in image_tensors]
 
-        # 有效提示词列表
-        prompts = [p for p in (prompt_list or []) if isinstance(p, str) and p.strip()]
+        # 有效提示词列表；字符串输入按单条 prompt 处理，避免被逐字符拆分
+        if isinstance(prompt_list, str):
+            prompt_candidates = [prompt_list]
+        else:
+            prompt_candidates = prompt_list or []
+
+        prompts = [p for p in prompt_candidates if isinstance(p, str) and p.strip()]
         if not prompts:
             prompts = [prompt]
 
