@@ -1,4 +1,3 @@
-import base64
 import io
 import json
 import logging
@@ -44,8 +43,11 @@ from .utils.common_util import (
     bytesio_to_image_tensor,
     downscale_image_tensor,
 )
+from .utils.gpt_image_size import resolution_to_edit_size
 from .utils.webhook import webhook_send
 from .gpt_image_edit_node import GPTImageEditNode
+from .gpt_image_node import FD_GTPImage
+from .gpt_multi_image_node import FD_GPTMultiImage
 from .prompt_nodes import EcommercePromptGenerator, PromptListSelector
 from .zhiyi_text_node import ZhiYiTextGenNode
 from .zhiyi_image_text_node import ZhiYiImageTextNode
@@ -61,58 +63,7 @@ FD_REMOVE_WATERMARK_SERVICE_URL = os.getenv("FD_REMOVE_WATERMARK_SERVICE_URL", "
 
 
 def _resolution_to_edit_size(resolution: str, aspect_ratio: str) -> str:
-    # gpt-image-2 accepts flexible sizes, but they must satisfy strict bounds:
-    # edge <= 3840, edges are multiples of 16, ratio <= 3:1,
-    # and total pixels stay within [655360, 8294400].
-    # Use fixed valid presets here so the Comfy node never emits illegal sizes.
-    size_map = {
-        "1K": {
-            "": "1024x1024",
-            "1:1": "1024x1024",
-            "3:4": "768x1024",
-            "9:16": "720x1280",
-        },
-        "2K": {
-            "": "2048x2048",
-            "1:1": "2048x2048",
-            "3:4": "1536x2048",
-            "9:16": "1152x2048",
-        },
-        "4K": {
-            "": "2880x2880",
-            "1:1": "2880x2880",
-            "3:4": "2160x2880",
-            "9:16": "2160x3840",
-        },
-    }
-    normalized_resolution = resolution if resolution in size_map else "2K"
-    return size_map[normalized_resolution].get(aspect_ratio, size_map[normalized_resolution][""])
-
-
-def _image_tensor_to_png_bytes(image: torch.Tensor) -> bytes:
-    image_np = (image.numpy() * 255).astype(np.uint8)
-    img = Image.fromarray(image_np)
-    img_byte_arr = BytesIO()
-    img.save(img_byte_arr, format="PNG")
-    return img_byte_arr.getvalue()
-
-
-def _summarize_gpt_image_result(result: dict) -> dict:
-    data_items = result.get("data", [])
-    item_summaries = []
-    for item in data_items:
-        item_summaries.append(
-            {
-                "keys": sorted(key for key in item.keys() if key != "b64_json"),
-                "has_b64_json": "b64_json" in item,
-                "has_url": bool(item.get("url")),
-            }
-        )
-    return {
-        "keys": sorted(key for key in result.keys() if key != "data"),
-        "data_count": len(data_items),
-        "data_items": item_summaries,
-    }
+    return resolution_to_edit_size(resolution, aspect_ratio)
 
 
 class FD_RemoveWatermark:
@@ -810,226 +761,6 @@ class FD_SeedreamImage(ComfyNodeABC):
         return (output_image,)
 
 
-class FD_GTPImage(ComfyNodeABC):
-    """
-    Node to edit images using GPT Image API.
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls) -> InputTypeDict:
-        return {
-            "required": {
-                "out_request_id": (
-                    IO.STRING,
-                    {
-                        "default": "default",
-                        "tooltip": "FD out_request_id for generation",
-                    },
-                ),
-                "prompt": (
-                    IO.STRING,
-                    {
-                        "multiline": True,
-                        "default": "",
-                        "tooltip": "Text prompt for generation",
-                    },
-                ),
-                "model": (
-                    IO.COMBO,
-                    {
-                        "tooltip": "The GPT image model to use for image edits.",
-                        "options": ["gpt-image-2"],
-                        "default": "gpt-image-2",
-                    },
-                ),
-                "resolution": (
-                    IO.COMBO,
-                    {
-                        "tooltip": "Output size preset for the image edit request.",
-                        "options": ["1K", "2K", "4K"],
-                        "default": "2K",
-                    },
-                ),
-                "seed": (
-                    IO.INT,
-                    {
-                        "default": 42,
-                        "min": 0,
-                        "max": 0xFFFFFFFFFFFFFFFF,
-                        "control_after_generate": True,
-                        "tooltip": "Reserved for compatibility with FD_GeminiImage input format.",
-                    },
-                ),
-            },
-            "optional": {
-                "images": (
-                    IO.IMAGE,
-                    {
-                        "default": None,
-                        "tooltip": "Input image(s) to edit. Multiple images are sent as repeated multipart fields.",
-                    },
-                ),
-                "files": (
-                    "GEMINI_INPUT_FILES",
-                    {
-                        "default": None,
-                        "tooltip": "Reserved for compatibility with FD_GeminiImage input format.",
-                    },
-                ),
-                "aspect_ratio": (
-                    IO.COMBO,
-                    {
-                        "default": "",
-                        "options": ["", "1:1", "3:4", "9:16"],
-                        "tooltip": "Optional aspect ratio for the edited image.",
-                    },
-                ),
-            },
-            "hidden": {
-                "auth_token": "AUTH_TOKEN_COMFY_ORG",
-                "comfy_api_key": "API_KEY_COMFY_ORG",
-                "unique_id": "UNIQUE_ID",
-            },
-        }
-
-    RETURN_TYPES = (IO.IMAGE, IO.STRING, IO.STRING)
-    FUNCTION = "api_call"
-    CATEGORY = "image/generation"
-    DESCRIPTION = "Edit images synchronously via GPT Image API."
-    API_NODE = True
-
-    def api_call(
-        self,
-        out_request_id: str,
-        prompt: str,
-        model: str,
-        resolution: Optional[str] = None,
-        images: Optional[IO.IMAGE] = None,
-        aspect_ratio: str = "",
-        files=None,
-        seed: int = 42,
-        unique_id: Optional[str] = None,
-        **kwargs,
-    ):
-        del files, seed, unique_id, kwargs
-
-        if images is None:
-            raise ValueError("FD_GTPImage requires at least one input image.")
-        if not prompt or not prompt.strip():
-            raise ValueError("FD_GTPImage requires a non-empty prompt.")
-
-        size = _resolution_to_edit_size(resolution or "2K", aspect_ratio)
-        data = {
-            "model": model,
-            "prompt": prompt.strip(),
-            "size": size,
-            "user": out_request_id,
-            "quality": "medium"
-        }
-
-        multipart_files = []
-        batch_size = images.shape[0]
-        for i in range(batch_size):
-            single_image = images[i : i + 1]
-            scaled_image = downscale_image_tensor(single_image, total_pixels=4096 * 4096).squeeze()
-            logger.info(
-                "FD_GTPImage Image %s resolution: input=%s scaled=%s",
-                i,
-                tuple(single_image.squeeze().shape),
-                tuple(scaled_image.shape),
-            )
-            img_bytes = _image_tensor_to_png_bytes(scaled_image)
-            multipart_files.append(
-                ("image", (f"image_{i}.png", img_bytes, "image/png"))
-            )
-
-        if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
-            try:
-                print("Sending gtp_image webhook message...")
-                webhook_send(FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL, {
-                    "gtp_image_request": {
-                        "data": data,
-                        "image_count": batch_size,
-                    }
-                })
-            except Exception:
-                pass
-
-        logger.info("Calling GPT Image API with data=%s image_count=%s", data, batch_size)
-
-        try:
-            headers = {
-                "Authorization": f"Bearer {FD_LITELLM_API_KEY}",
-            }
-            response = requests.post(
-                url=f"{FD_LITELLM_BASE_URL}/v1/images/edits",
-                headers=headers,
-                data=data,
-                files=multipart_files,
-                timeout=600,
-            )
-            response.raise_for_status()
-            result = response.json()
-            logger.info("GPT Image API response summary: %s", _summarize_gpt_image_result(result))
-
-            first_item = result["data"][0]
-            result_url = first_item.get("url", "")
-
-            if result_url:
-                image_content = requests.get(result_url, timeout=300).content
-                image_bytesio = BytesIO(image_content)
-            elif first_item.get("b64_json"):
-                image_bytesio = BytesIO(base64.b64decode(first_item["b64_json"]))
-            else:
-                raise ValueError(
-                    "GPT Image API returned no usable image payload: "
-                    f"{_summarize_gpt_image_result(result)}"
-                )
-        except requests.exceptions.Timeout as exc:
-            traceback.print_exc()
-            raise GenImageServiceError("TIMEOUT") from exc
-        except requests.exceptions.HTTPError as exc:
-            response = exc.response
-            status_code = response.status_code if response is not None else "unknown"
-            response_text = response.text if response is not None else str(exc)
-            logger.error(
-                "GPT Image API HTTP error status=%s response=%s",
-                status_code,
-                response_text,
-            )
-            raise GenImageServiceError(
-                f"HTTP {status_code} from GPT Image API: {response_text}"
-            ) from exc
-        except requests.exceptions.RequestException as exc:
-            traceback.print_exc()
-            raise GenImageServiceError(f"REQUEST_ERROR: {exc}") from exc
-        except Exception as exc:
-            traceback.print_exc()
-            raise GenImageServiceError(f"UNEXPECTED_ERROR: {exc}") from exc
-
-        if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
-            try:
-                print("Sending gtp_image webhook message...")
-                webhook_send(FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL, {
-                    "gtp_image_full": {
-                        "request": {
-                            "data": data,
-                            "image_count": batch_size,
-                        },
-                        "response": {
-                            "result_url": result_url,
-                            "data_keys": list(first_item.keys()),
-                        },
-                    }
-                })
-            except Exception:
-                pass
-
-        output_image = bytesio_to_image_tensor(image_bytesio)
-        output_text = first_item.get("revised_prompt") or result.get("message", "")
-        return (output_image, output_text, result_url)
-
-
 class Example:
     """
     A example node
@@ -1145,6 +876,7 @@ NODE_CLASS_MAPPINGS = {
     "FD_imgToText_Doubao": FD_imgToText_Doubao,
     "FD_GeminiImage": FD_GeminiImage,
     "FD_GTPImage": FD_GTPImage,
+    "FD_GPTMultiImage": FD_GPTMultiImage,
     "FD_Flux2KleinGenImage": FD_Flux2KleinGenImage,
     "FD_ZImageTurboGenImage": FD_ZImageTurboGenImage,
     "FD_SeedreamImage": FD_SeedreamImage,
@@ -1164,6 +896,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FD_imgToText_Doubao": "FD Image to Text (Doubao)",
     "FD_GeminiImage": "FD Gemini Image",
     "FD_GTPImage": "FD GTP Image",
+    "FD_GPTMultiImage": "FD GPT Multi Image",
     "FD_Flux2KleinGenImage": "FD Flux2Klein Gen Image",
     "FD_ZImageTurboGenImage": "FD Z-Image-Turbo Gen Image",
     "FD_SeedreamImage": "FD Seedream Image",
