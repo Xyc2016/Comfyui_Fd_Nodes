@@ -10,11 +10,15 @@ from .config import (
     FD_LITELLM_BASE_URL,
 )
 
+_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
 def _load_config():
     return {"api_url": FD_LITELLM_BASE_URL, "api_key": FD_LITELLM_API_KEY}
 
+
 def _load_prompt(filename):
-    prompt_file = os.path.join(_CURRENT_DIR, "prompts", filename)
+    prompt_file = os.path.join(_CURRENT_DIR, filename)
     try:
         with open(prompt_file, "r", encoding="utf-8") as f:
             return f.read().strip()
@@ -31,7 +35,7 @@ def _load_system_prompt():
         print("⚠️ Falling back to default_prompt.txt")
         prompt = _load_prompt("other/default_prompt.txt")
     if prompt is None:
-        raise FileNotFoundError("No prompt files found in prompts/ directory. Please ensure system_prompt.txt or default_prompt.txt exists.")
+        raise FileNotFoundError("No prompt files found in other/ directory. Please ensure system_prompt.txt or default_prompt.txt exists.")
     return prompt
 
 class EcommercePromptGenerator:
@@ -248,7 +252,7 @@ class EcommercePromptGenerator:
             "required": {
                 "model_name": ("STRING", {
                     "multiline": False,
-                    "default": "gemini-2.0-flash-exp",
+                    "default": "gemini-3-pro-preview",
                 }),
                 "product_type": ("STRING", {
                     "multiline": False,
