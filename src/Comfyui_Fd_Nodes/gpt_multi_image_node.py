@@ -30,7 +30,7 @@ class FD_GPTMultiImage:
     """GPT 多图编辑节点，沿用知衣多图输入与并发方式，底层调用 GPT Image edits API。"""
 
     MODELS = ["gpt-image-2"]
-    ASPECT_RATIOS = ["1:1", "16:9", "9:16", "4:3", "3:4"]
+    ASPECT_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9"]
     IMAGE_SIZES = ["4K", "2K", "1080P", "720P"]
     SEED_MODES = ["随机种子", "固定种子"]
 

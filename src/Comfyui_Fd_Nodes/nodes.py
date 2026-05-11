@@ -44,6 +44,7 @@ from .utils.common_util import (
     bytesio_to_image_tensor,
     downscale_image_tensor,
 )
+from .utils.gpt_image_size import resolution_to_edit_size
 from .utils.webhook import webhook_send
 from .gpt_multi_image_node import FD_GPTMultiImage
 from .prompt_nodes import EcommercePromptGenerator, PromptListSelector
@@ -61,32 +62,7 @@ FD_REMOVE_WATERMARK_SERVICE_URL = os.getenv("FD_REMOVE_WATERMARK_SERVICE_URL", "
 
 
 def _resolution_to_edit_size(resolution: str, aspect_ratio: str) -> str:
-    # gpt-image-2 accepts flexible sizes, but they must satisfy strict bounds:
-    # edge <= 3840, edges are multiples of 16, ratio <= 3:1,
-    # and total pixels stay within [655360, 8294400].
-    # Use fixed valid presets here so the Comfy node never emits illegal sizes.
-    size_map = {
-        "1K": {
-            "": "1024x1024",
-            "1:1": "1024x1024",
-            "3:4": "768x1024",
-            "9:16": "720x1280",
-        },
-        "2K": {
-            "": "2048x2048",
-            "1:1": "2048x2048",
-            "3:4": "1536x2048",
-            "9:16": "1152x2048",
-        },
-        "4K": {
-            "": "2880x2880",
-            "1:1": "2880x2880",
-            "3:4": "2160x2880",
-            "9:16": "2160x3840",
-        },
-    }
-    normalized_resolution = resolution if resolution in size_map else "2K"
-    return size_map[normalized_resolution].get(aspect_ratio, size_map[normalized_resolution][""])
+    return resolution_to_edit_size(resolution, aspect_ratio)
 
 
 def _image_tensor_to_png_bytes(image: torch.Tensor) -> bytes:
@@ -307,7 +283,7 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
                     },
                 ),
                 "aspect_ratio": (
-                    ["auto", "1:1", "3:4", "9:16"],
+                    ["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9"],
                     {
                         "default": "auto",
                         "tooltip": "Aspect ratio for generation",
@@ -473,7 +449,7 @@ class FD_ZImageTurboGenImage(ComfyNodeABC):
                     },
                 ),
                 "aspect_ratio": (
-                    ["auto", "1:1", "3:4", "9:16"],
+                    ["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9"],
                     {
                         "default": "auto",
                         "tooltip": "Aspect ratio for generation",
@@ -880,7 +856,7 @@ class FD_GTPImage(ComfyNodeABC):
                     IO.COMBO,
                     {
                         "default": "",
-                        "options": ["", "1:1", "3:4", "9:16"],
+                        "options": ["", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9"],
                         "tooltip": "Optional aspect ratio for the edited image.",
                     },
                 ),

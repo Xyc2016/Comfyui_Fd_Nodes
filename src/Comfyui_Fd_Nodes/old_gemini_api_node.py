@@ -174,7 +174,7 @@ class FD_GeminiImage(ComfyNodeABC):
                     IO.COMBO,
                     {
                         "default": "",
-                        "options": ["", "1:1", "3:4","9:16"],
+                        "options": ["", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9"],
                         "tooltip": "Optional aspect ratio for the generated image",
                     }
                 ),
@@ -298,5 +298,4 @@ class FD_GeminiImage(ComfyNodeABC):
         output_image = bytesio_to_image_tensor(image_bytesio)
         output_text = result["message"]
         return (output_image, output_text, result_url)
-
 
