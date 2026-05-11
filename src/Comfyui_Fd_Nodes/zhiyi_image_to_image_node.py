@@ -31,7 +31,7 @@ class ZhiYiImageToImageNode:
         "gemini-3-pro-image-preview-official",
     ]
 
-    ASPECT_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9"]
+    ASPECT_RATIOS = ["", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9"]
     IMAGE_SIZES = ["4K", "2K", "1080P", "720P"]
     SEED_MODES = ["随机种子", "固定种子"]
 
@@ -45,8 +45,8 @@ class ZhiYiImageToImageNode:
                     "multiline": True,
                 }),
                 "model": (cls.MODELS, {"default": cls.MODELS[0]}),
-                "aspect_ratio": (cls.ASPECT_RATIOS, {"default": "1:1"}),
-                "image_size": (cls.IMAGE_SIZES, {"default": "4K"}),
+                "aspect_ratio": (cls.ASPECT_RATIOS, {"default": ""}),
+                "image_size": (cls.IMAGE_SIZES, {"default": "2K"}),
                 "batch_size": ("INT", {
                     "default": 1,
                     "min": 1,
