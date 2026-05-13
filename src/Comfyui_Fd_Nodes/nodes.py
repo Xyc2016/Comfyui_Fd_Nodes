@@ -53,6 +53,7 @@ from .zhiyi_image_text_node import ZhiYiImageTextNode
 from .zhiyi_image_to_image_node import ZhiYiImageToImageNode
 from .toggle import NodeToggleByID
 from .utils.logging_utils import configure_default_logging
+from .zhiyi_image_combo_node import ZhiYiImageComboNode
 
 configure_default_logging()
 logger = logging.getLogger(__name__)
@@ -1131,6 +1132,7 @@ NODE_CLASS_MAPPINGS = {
     "ZhiYiImageToImageNode": ZhiYiImageToImageNode,
     "ZhiYiTextGenNode": ZhiYiTextGenNode,
     "NodeToggleByID": NodeToggleByID,
+    "ZhiYiImageComboNode": ZhiYiImageComboNode,
 }
 
 # A dictionary that contains the friendly/humanly readable titles for the nodes
@@ -1150,4 +1152,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ZhiYiImageToImageNode": "知衣-图生图",
     "ZhiYiTextGenNode": "知衣-文生文",
     "NodeToggleByID": "节点开关 (按ID)",
+    "ZhiYiImageComboNode": "fd-输入参数组合",
 }
