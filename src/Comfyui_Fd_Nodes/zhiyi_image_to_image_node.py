@@ -316,7 +316,7 @@ class ZhiYiImageToImageNode:
             messages = self._build_messages(p, image_b64_list, system_prompt)
             for b_idx in range(batch_size):
                 s = (actual_seed + p_idx * batch_size + b_idx) if seed_mode == "固定种子" else random.randint(0, 2147483647)
-                tasks.append((task_idx, self._single_request, (url, api_key, messages, model, aspect_ratio, image_size, s, out_request_id)))
+                tasks.append((task_idx, self._single_request, (url, api_key, messages, model, aspect_ratio or None, image_size, s, out_request_id)))
                 task_idx += 1
 
         logger.info(
