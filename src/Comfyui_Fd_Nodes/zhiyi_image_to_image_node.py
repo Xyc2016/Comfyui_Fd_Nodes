@@ -28,7 +28,7 @@ class ZhiYiImageToImageNode:
         "gemini-3-pro-image-preview",
         "gemini-3.1-flash-image-preview",
         "gemini-2.5-flash-image-preview",
-        "gemini-3-pro-image-preview-official",
+        "gemini-3-pro-image-preview-aistudio",
     ]
 
     ASPECT_RATIOS = ["", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9"]
@@ -189,7 +189,7 @@ class ZhiYiImageToImageNode:
 
         raise KeyError(f"无法从响应中提取图片，响应结构: {list(msg.keys())}")
 
-    MODELS_NO_SEED = {"gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview"}
+    MODELS_NO_SEED = {"gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview", "gemini-3-pro-image-preview-aistudio"}
 
     def _single_request(self, url, api_key, messages, model, aspect_ratio, image_size, seed, out_request_id="default"):
         payload = {
