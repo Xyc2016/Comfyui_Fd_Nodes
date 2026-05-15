@@ -16,6 +16,7 @@ from .config import (
 from .config_manager import load_config
 from .old_gemini_api_node import GenImageServiceError
 from .utils.common_util import bytesio_to_image_tensor, downscale_image_tensor
+from .utils.error_utils import normalize_error_message
 from .utils.gpt_image_size import resolution_to_edit_size
 from .utils.gpt_image_request import GptImageRequestMixin
 from .utils.logging_utils import configure_default_logging
@@ -115,6 +116,7 @@ class FD_GPTMultiImage(GptImageRequestMixin):
 
     def _run_concurrent(self, tasks, label="任务"):
         results = [None] * len(tasks)
+        last_error_message = None
         with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
             futures = {
                 executor.submit(fn, *args): idx
@@ -125,6 +127,7 @@ class FD_GPTMultiImage(GptImageRequestMixin):
                 try:
                     results[idx] = future.result()
                 except Exception as exc:
+                    last_error_message = normalize_error_message(exc)
                     logger.warning(
                         "[GPT多图] %s 第 %s 个失败，已跳过: %s: %s",
                         label,
@@ -133,7 +136,7 @@ class FD_GPTMultiImage(GptImageRequestMixin):
                         exc,
                     )
                     traceback.print_exc()
-        return results
+        return results, last_error_message
 
     def _single_request(
         self,
@@ -200,7 +203,9 @@ class FD_GPTMultiImage(GptImageRequestMixin):
             traceback.print_exc()
             if isinstance(exc, GenImageServiceError):
                 raise
-            raise GenImageServiceError(f"UNEXPECTED_ERROR: {exc}") from exc
+            raise GenImageServiceError(
+                normalize_error_message(f"UNEXPECTED_ERROR: {exc}")
+            ) from exc
 
         return output_image
 
@@ -290,11 +295,13 @@ class FD_GPTMultiImage(GptImageRequestMixin):
             len(prompts),
             batch_size,
         )
-        results = self._run_concurrent(tasks, label="请求")
+        results, last_error_message = self._run_concurrent(tasks, label="请求")
 
         successful = [result for result in results if result is not None]
         if not successful:
-            raise RuntimeError("所有请求均失败，无图片返回")
+            raise RuntimeError(
+                last_error_message or normalize_error_message("所有请求均失败，无图片返回")
+            )
 
         logger.info("[GPT多图] 成功 %s/%s", len(successful), total)
         return (torch.cat(successful, dim=0), actual_seed)

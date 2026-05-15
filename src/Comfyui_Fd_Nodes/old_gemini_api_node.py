@@ -27,6 +27,7 @@ from .utils.common_util import (
     bytesio_to_image_tensor,
     downscale_image_tensor,
 )
+from .utils.error_utils import normalize_error_message
 from .utils.logging_utils import configure_default_logging
 from .utils.webhook import webhook_send
 
@@ -290,7 +291,13 @@ class FD_GeminiImage(ComfyNodeABC):
         logger.info(f"Gemini API response: {result}")
 
         if result.get("error", {}).get("code"):
-            raise GenImageServiceError(result["error"]["code"])
+            error = result["error"]
+            raise GenImageServiceError(
+                normalize_error_message(
+                    error.get("message") or error["code"],
+                    category=error["code"],
+                )
+            )
 
         result_url = result["result_image_url"]
         image_content = requests.get(result_url).content
@@ -298,4 +305,3 @@ class FD_GeminiImage(ComfyNodeABC):
         output_image = bytesio_to_image_tensor(image_bytesio)
         output_text = result["message"]
         return (output_image, output_text, result_url)
-

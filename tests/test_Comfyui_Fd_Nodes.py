@@ -6,7 +6,9 @@ import json
 import logging
 
 import pytest
+import torch
 from src.Comfyui_Fd_Nodes.gpt_image_edit_node import GPTImageEditNode
+from src.Comfyui_Fd_Nodes.gpt_multi_image_node import FD_GPTMultiImage
 from src.Comfyui_Fd_Nodes.nodes import (
     FD_GTPImage,
     Example,
@@ -19,8 +21,10 @@ from src.Comfyui_Fd_Nodes import zhiyi_image_text_node as zhiyi_image_text_modul
 from src.Comfyui_Fd_Nodes import zhiyi_image_to_image_node as zhiyi_image_to_image_module
 from src.Comfyui_Fd_Nodes import zhiyi_text_node as zhiyi_text_module
 from src.Comfyui_Fd_Nodes.zhiyi_image_text_node import ZhiYiImageTextNode
+from src.Comfyui_Fd_Nodes.zhiyi_image_to_image_combo_node import ZhiYiImageToImageComboNode
 from src.Comfyui_Fd_Nodes.zhiyi_image_to_image_node import ZhiYiImageToImageNode
 from src.Comfyui_Fd_Nodes.zhiyi_text_node import ZhiYiTextGenNode
+from src.Comfyui_Fd_Nodes.utils.error_utils import normalize_error_message
 from src.Comfyui_Fd_Nodes.utils.logging_utils import (
     DEFAULT_LOG_DATE_FORMAT,
     DEFAULT_LOG_FORMAT,
@@ -187,6 +191,79 @@ def test_zhiyi_image_to_image_request_logs_request_and_response_without_images(m
     assert response_log["status_code"] == 200
     assert response_log["choice_count"] == 1
     assert response_log["image_count"] == 1
+
+
+def test_normalize_error_message_classifies_timeout_and_nsfw():
+    assert normalize_error_message("Read timed out") == "TIMEOUT: Read timed out"
+    assert normalize_error_message("内容被过滤 (content_filter)，请修改提示词") == "NSFW: 内容被过滤 (content_filter)，请修改提示词"
+    assert normalize_error_message("HTTP 400 from GPT Image API: bad request") == "UNKNOWN: HTTP 400 from GPT Image API: bad request"
+
+
+def test_zhiyi_image_to_image_generate_returns_last_actual_error(monkeypatch):
+    node = ZhiYiImageToImageNode()
+    image = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
+
+    monkeypatch.setattr(zhiyi_image_to_image_module, "load_config", lambda: {"base_url": "https://example.com", "api_key": "secret"})
+    monkeypatch.setattr(node, "_tensor_to_base64", lambda _tensor: "AAA")
+    monkeypatch.setattr(
+        node,
+        "_run_concurrent",
+        lambda tasks, label="任务": ([None] * len(tasks), "NSFW: 内容被过滤 (content_filter)，请修改提示词或输入图片后重试"),
+    )
+
+    with pytest.raises(RuntimeError, match=r"^NSFW: 内容被过滤"):
+        node.generate(
+            image_1=image,
+            prompt="test prompt",
+            model=ZhiYiImageToImageNode.MODELS[0],
+            aspect_ratio="1:1",
+            image_size="2K",
+            batch_size=1,
+        )
+
+
+def test_gpt_multi_image_generate_returns_last_actual_error(monkeypatch):
+    node = FD_GPTMultiImage()
+    image = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
+
+    monkeypatch.setattr("src.Comfyui_Fd_Nodes.gpt_multi_image_node.load_config", lambda: {"base_url": "https://example.com", "api_key": "secret"})
+    monkeypatch.setattr(
+        node,
+        "_run_concurrent",
+        lambda tasks, label="任务": ([None] * len(tasks), "TIMEOUT: request timed out"),
+    )
+
+    with pytest.raises(RuntimeError, match=r"^TIMEOUT: request timed out$"):
+        node.generate(
+            image_1=image,
+            prompt="test prompt",
+            model="gpt-image-2",
+            aspect_ratio="1:1",
+            image_size="2K",
+            batch_size=1,
+        )
+
+
+def test_zhiyi_image_to_image_combo_generate_returns_last_actual_error(monkeypatch):
+    node = ZhiYiImageToImageComboNode()
+    combo = {"images": [torch.zeros((1, 2, 2, 3), dtype=torch.float32)], "prompts": ["test prompt"]}
+
+    monkeypatch.setattr(
+        node,
+        "_run_concurrent",
+        lambda tasks, max_workers, label="任务": ([None] * len(tasks), ["[请求 1] 失败"], "UNKNOWN: API 请求失败: 500\ninternal error"),
+    )
+    monkeypatch.setattr(node, "_tensor_to_base64", lambda _tensor: "AAA")
+
+    with pytest.raises(RuntimeError, match=r"^UNKNOWN: API 请求失败: 500"):
+        node.generate(
+            model=ZhiYiImageToImageComboNode.MODELS[0],
+            aspect_ratio="1:1",
+            image_size="4K",
+            batch_size=1,
+            max_concurrency=1,
+            combo_1=combo,
+        )
 
 
 def test_zhiyi_image_text_request_logs_request_and_response_without_images(monkeypatch):

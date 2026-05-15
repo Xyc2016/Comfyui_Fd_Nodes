@@ -10,6 +10,7 @@ import torch
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from .config_manager import load_config
+from .utils.error_utils import ERROR_NSFW, ERROR_TIMEOUT, normalize_error_message
 from .utils.logging_utils import configure_default_logging
 import logging
 from .config import (
@@ -169,7 +170,12 @@ class ZhiYiImageToImageNode:
     def _extract_image_from_response(self, result):
         choice = result["choices"][0]
         if choice.get("finish_reason") == "content_filter":
-            raise RuntimeError("内容被过滤 (content_filter)，请修改提示词或输入图片后重试")
+            raise RuntimeError(
+                normalize_error_message(
+                    "内容被过滤 (content_filter)，请修改提示词或输入图片后重试",
+                    category=ERROR_NSFW,
+                )
+            )
         msg = choice["message"]
 
         if "images" in msg and msg["images"]:
@@ -215,29 +221,35 @@ class ZhiYiImageToImageNode:
                 "messages": self._summarize_messages_for_log(messages),
             },
         )
-        response = requests.post(
-            url=url,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            data=json.dumps(payload),
-            timeout=600,
-        )
-        if not response.ok:
-            raise RuntimeError(f"API 请求失败: {response.status_code}\n{response.text[:1000]}")
-        result = response.json()
-        logger.info(
-            "ZhiYi image-to-image API response summary: %s",
-            {
-                "status_code": response.status_code,
-                **self._summarize_response_for_log(result),
-            },
-        )
         try:
+            response = requests.post(
+                url=url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                data=json.dumps(payload),
+                timeout=600,
+            )
+            if not response.ok:
+                raise RuntimeError(f"API 请求失败: {response.status_code}\n{response.text[:1000]}")
+            result = response.json()
+            logger.info(
+                "ZhiYi image-to-image API response summary: %s",
+                {
+                    "status_code": response.status_code,
+                    **self._summarize_response_for_log(result),
+                },
+            )
             out_data_url = self._extract_image_from_response(result)
         except (KeyError, IndexError) as e:
-            raise RuntimeError(f"解析响应失败: {e}\n原始响应: {response.text[:500]}")
+            raise RuntimeError(normalize_error_message(f"解析响应失败: {e}\n原始响应: {response.text[:500]}"))
+        except requests.exceptions.Timeout as exc:
+            raise RuntimeError(
+                normalize_error_message(exc, category=ERROR_TIMEOUT, fallback_detail="request timed out")
+            ) from exc
+        except Exception as exc:
+            raise RuntimeError(normalize_error_message(exc)) from exc
         return self._base64_to_tensor(out_data_url)
 
     def _build_messages(self, prompt, image_b64_list, system_prompt):
@@ -259,6 +271,7 @@ class ZhiYiImageToImageNode:
     def _run_concurrent(self, tasks, label="任务"):
         """tasks: list of (idx, callable, args)，并发执行，返回 {idx: result}"""
         results = [None] * len(tasks)
+        last_error_message = None
         with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
             futures = {
                 executor.submit(fn, *args): idx
@@ -269,6 +282,7 @@ class ZhiYiImageToImageNode:
                 try:
                     results[idx] = future.result()
                 except Exception as e:
+                    last_error_message = normalize_error_message(e)
                     logger.warning(
                         "[知衣图生图] %s 第 %s 个失败，已跳过: %s: %s",
                         label,
@@ -277,7 +291,7 @@ class ZhiYiImageToImageNode:
                         e,
                     )
                     traceback.print_exc()
-        return results
+        return results, last_error_message
 
     def generate(self, image_1, prompt, model, aspect_ratio, image_size,
                  batch_size=1, seed_mode="随机种子", seed=0,
@@ -325,11 +339,13 @@ class ZhiYiImageToImageNode:
             len(prompts),
             batch_size,
         )
-        results = self._run_concurrent(tasks, label="请求")
+        results, last_error_message = self._run_concurrent(tasks, label="请求")
 
         successful = [r for r in results if r is not None]
         if not successful:
-            raise RuntimeError("所有请求均失败，无图片返回")
+            raise RuntimeError(
+                last_error_message or normalize_error_message("所有请求均失败，无图片返回")
+            )
 
         logger.info("[知衣图生图] 成功 %s/%s", len(successful), total)
         return (torch.cat(successful, dim=0), actual_seed)

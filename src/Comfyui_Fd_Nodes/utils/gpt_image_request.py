@@ -7,6 +7,7 @@ import requests
 
 from ..config import FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL
 from ..old_gemini_api_node import GenImageServiceError
+from .error_utils import ERROR_TIMEOUT, classify_error_message, normalize_error_message
 from .webhook import webhook_send
 
 
@@ -96,20 +97,28 @@ class GptImageRequestMixin:
             image_bytesio, output_text, result_url = self._decode_gpt_image_result(result)
         except requests.exceptions.Timeout as exc:
             traceback.print_exc()
-            raise GenImageServiceError("TIMEOUT") from exc
+            raise GenImageServiceError(
+                normalize_error_message(exc, category=ERROR_TIMEOUT, fallback_detail="request timed out")
+            ) from exc
         except requests.exceptions.HTTPError as exc:
             response = exc.response
             status_code = response.status_code if response is not None else "unknown"
             response_text = response.text if response is not None else str(exc)
             raise GenImageServiceError(
-                f"HTTP {status_code} from {log_label}: {response_text}"
+                normalize_error_message(
+                    f"HTTP {status_code} from {log_label}: {response_text}"
+                )
             ) from exc
         except requests.exceptions.RequestException as exc:
             traceback.print_exc()
-            raise GenImageServiceError(f"REQUEST_ERROR: {exc}") from exc
+            raise GenImageServiceError(
+                normalize_error_message(f"REQUEST_ERROR: {exc}")
+            ) from exc
         except Exception as exc:
             traceback.print_exc()
-            raise GenImageServiceError(f"UNEXPECTED_ERROR: {exc}") from exc
+            raise GenImageServiceError(
+                normalize_error_message(f"UNEXPECTED_ERROR: {exc}")
+            ) from exc
 
         if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
             try:
@@ -210,7 +219,7 @@ class GptImageRequestMixin:
                     logger=logger,
                 )
             except GenImageServiceError as exc:
-                if str(exc) == "TIMEOUT":
+                if classify_error_message(exc) == ERROR_TIMEOUT:
                     logger.warning(
                         "GPT Image API timed out for model=%s on attempt=%s/%s, falling back to model=%s",
                         primary_model,

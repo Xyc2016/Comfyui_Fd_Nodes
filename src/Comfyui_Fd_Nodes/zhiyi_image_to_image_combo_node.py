@@ -10,6 +10,7 @@ import torch
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from .config_manager import load_config
+from .utils.error_utils import ERROR_NSFW, ERROR_TIMEOUT, normalize_error_message
 from .utils.logging_utils import configure_default_logging
 import logging
 from .config import (
@@ -151,7 +152,12 @@ class ZhiYiImageToImageComboNode:
     def _extract_image_from_response(self, result):
         choice = result["choices"][0]
         if choice.get("finish_reason") == "content_filter":
-            raise RuntimeError("内容被过滤 (content_filter)，请修改提示词或输入图片后重试")
+            raise RuntimeError(
+                normalize_error_message(
+                    "内容被过滤 (content_filter)，请修改提示词或输入图片后重试",
+                    category=ERROR_NSFW,
+                )
+            )
         msg = choice["message"]
 
         if "images" in msg and msg["images"]:
@@ -203,22 +209,28 @@ class ZhiYiImageToImageComboNode:
             f"{json.dumps(log_payload, ensure_ascii=False)}"
         )
         logger.info("Calling ZhiYi image-to-image combo API with payload=%s", log_payload)
-        response = requests.post(
-            url=url,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            data=json.dumps(payload),
-            timeout=600,
-        )
-        if not response.ok:
-            raise RuntimeError(f"API 请求失败: {response.status_code}\n{response.text[:1000]}")
-        result = response.json()
         try:
+            response = requests.post(
+                url=url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                data=json.dumps(payload),
+                timeout=600,
+            )
+            if not response.ok:
+                raise RuntimeError(f"API 请求失败: {response.status_code}\n{response.text[:1000]}")
+            result = response.json()
             out_data_url = self._extract_image_from_response(result)
         except (KeyError, IndexError) as e:
-            raise RuntimeError(f"解析响应失败: {e}\n原始响应: {response.text[:500]}")
+            raise RuntimeError(normalize_error_message(f"解析响应失败: {e}\n原始响应: {response.text[:500]}"))
+        except requests.exceptions.Timeout as exc:
+            raise RuntimeError(
+                normalize_error_message(exc, category=ERROR_TIMEOUT, fallback_detail="request timed out")
+            ) from exc
+        except Exception as exc:
+            raise RuntimeError(normalize_error_message(exc)) from exc
         return self._base64_to_tensor(out_data_url)
 
     def _build_messages(self, prompt, image_b64_list, system_prompt):
@@ -241,6 +253,7 @@ class ZhiYiImageToImageComboNode:
         """tasks: list of (idx, callable, args)，并发执行，返回 (results_list, log_lines)"""
         results = [None] * len(tasks)
         log_lines = []
+        last_error_message = None
         workers = min(len(tasks), max(1, max_workers))
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
@@ -253,11 +266,12 @@ class ZhiYiImageToImageComboNode:
                     results[idx] = future.result()
                     log_lines.append(f"[{label} {idx + 1}] 成功")
                 except Exception as e:
+                    last_error_message = normalize_error_message(e)
                     msg = f"[{label} {idx + 1}] 失败: {type(e).__name__}: {e}"
                     log_lines.append(msg)
                     print(f"[知衣图生图] {msg}")
                     traceback.print_exc()
-        return results, log_lines
+        return results, log_lines, last_error_message
 
     def generate(self, model, aspect_ratio, image_size,
                  batch_size=1, max_concurrency=16, seed_mode="随机种子", seed=0,
@@ -301,17 +315,20 @@ class ZhiYiImageToImageComboNode:
                         tasks.append((task_idx, self._single_request, (url, final_api_key, messages, model, aspect_ratio or None, image_size, s, out_request_id)))
                         task_idx += 1
             except Exception as e:
-                msg = f"[combo_{c_idx + 1}] 预处理失败，跳过: {type(e).__name__}: {e}"
+                normalized_error = normalize_error_message(e)
+                msg = f"[combo_{c_idx + 1}] 预处理失败，跳过: {type(e).__name__}: {normalized_error}"
                 pre_errors.append(msg)
                 print(f"[知衣图生图] {msg}")
                 traceback.print_exc()
 
         if not tasks:
-            err = "\n".join(pre_errors) if pre_errors else "所有组合均无有效图片"
-            raise RuntimeError(f"无可发送请求\n{err}")
+            if pre_errors:
+                last_pre_error = pre_errors[-1].split(": ", 1)[-1]
+                raise RuntimeError(last_pre_error)
+            raise RuntimeError(normalize_error_message("所有组合均无有效图片"))
 
         print(f"[知衣图生图] 并发发送 {len(tasks)} 个请求（{len(combos)} 个组合 × batch_size {batch_size}），并发上限 {max_concurrency}")
-        results, log_lines = self._run_concurrent(tasks, max_concurrency, label="请求")
+        results, log_lines, last_error_message = self._run_concurrent(tasks, max_concurrency, label="请求")
 
         successful = [r for r in results if r is not None]
         header = f"总计: {len(successful)}/{len(tasks)} 成功, url={url}"
@@ -321,7 +338,9 @@ class ZhiYiImageToImageComboNode:
         log_text = "\n".join(log_lines)
 
         if not successful:
-            raise RuntimeError(f"所有请求均失败，无图片返回\n{log_text}")
+            raise RuntimeError(
+                last_error_message or normalize_error_message(f"所有请求均失败，无图片返回\n{log_text}")
+            )
 
         print(f"[知衣图生图] 成功 {len(successful)}/{len(tasks)}")
         return (successful, actual_seed, log_text)
