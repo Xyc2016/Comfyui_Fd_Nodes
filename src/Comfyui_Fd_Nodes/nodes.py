@@ -45,6 +45,7 @@ from .utils.common_util import (
 )
 from .utils.webhook import webhook_send
 from .gpt_image_node import FD_GTPImage
+from .gpt_image_combo_node import FD_GPTImageComboNode
 from .gpt_multi_image_node import FD_GPTMultiImage
 from .prompt_nodes import EcommercePromptGenerator, PromptListSelector
 from .zhiyi_text_node import ZhiYiTextGenNode
@@ -872,6 +873,7 @@ NODE_CLASS_MAPPINGS = {
     "FD_imgToText_Doubao": FD_imgToText_Doubao,
     "FD_GeminiImage": FD_GeminiImage,
     "FD_GTPImage": FD_GTPImage,
+    "FD_GPTImageComboNode": FD_GPTImageComboNode,
     "FD_GPTMultiImage": FD_GPTMultiImage,
     "FD_Flux2KleinGenImage": FD_Flux2KleinGenImage,
     "FD_ZImageTurboGenImage": FD_ZImageTurboGenImage,
@@ -893,6 +895,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FD_imgToText_Doubao": "FD Image to Text (Doubao)",
     "FD_GeminiImage": "FD Gemini Image",
     "FD_GTPImage": "FD GTP Image",
+    "FD_GPTImageComboNode": "FD GPT Image Combo",
     "FD_GPTMultiImage": "FD GPT Multi Image",
     "FD_Flux2KleinGenImage": "FD Flux2Klein Gen Image",
     "FD_ZImageTurboGenImage": "FD Z-Image-Turbo Gen Image",
