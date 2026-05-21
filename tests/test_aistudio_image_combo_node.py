@@ -15,6 +15,14 @@ def test_aistudio_combo_node_metadata():
     assert {"base_url", "api_key"}.isdisjoint(input_types["required"])
 
 
+def test_aistudio_combo_payload_normalizes_image_size_to_uppercase_k():
+    node = ZhiYiAiStudioImageComboNode()
+
+    payload = node._build_payload("prompt", ["https://example.com/input.png"], "1:1", "2k")
+
+    assert payload["payload"]["image_size"] == "2K"
+
+
 def test_aistudio_combo_single_request_posts_publish_payload(monkeypatch):
     node = ZhiYiAiStudioImageComboNode()
     captured = []

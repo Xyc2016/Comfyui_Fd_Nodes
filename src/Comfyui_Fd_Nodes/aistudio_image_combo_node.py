@@ -185,11 +185,17 @@ class ZhiYiAiStudioImageComboNode:
             return f"{system_text}\n\n{prompt_text}"
         return system_text or prompt_text
 
+    def _normalize_image_size(self, image_size):
+        size_text = str(image_size or "").strip()
+        if size_text.lower().endswith("k"):
+            return f"{size_text[:-1]}K"
+        return size_text
+
     def _build_payload(self, prompt, image_urls, aspect_ratio, image_size):
         payload = {
             "prompt": prompt,
             "image": image_urls,
-            "image_size": image_size,
+            "image_size": self._normalize_image_size(image_size),
         }
         if aspect_ratio:
             payload["aspect_ratio"] = aspect_ratio
