@@ -24,6 +24,7 @@ FD_LITELLM_BASE_URL = os.getenv("FD_LITELLM_BASE_URL")
 FD_LITELLM_API_KEY = os.getenv("FD_LITELLM_API_KEY")
 
 FD_OSS_URL_PATH_PREFIX_BEFORE_GEN = os.getenv("FD_OSS_URL_PATH_PREFIX_BEFORE_GEN", "devops/comfyui/segment_img")
+FD_AISTUDIO_PUBLISH_URL = os.getenv("FD_AISTUDIO_PUBLISH_URL", "http://121.40.67.98:2003/api/tasks/publish")
 
 assert FD_LITELLM_BASE_URL, "FD_LITELLM_BASE_URL is not set"
 assert FD_LITELLM_API_KEY, "FD_LITELLM_API_KEY is not set"
