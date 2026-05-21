@@ -188,7 +188,7 @@ class ZhiYiImageToImageComboNode:
             "imageConfig": {"image_size": image_size},
             "modalities": ["image"],
         }
-        if aspect_ratio != "auto":
+        if aspect_ratio and aspect_ratio != "auto":
             payload["imageConfig"]["aspect_ratio"] = aspect_ratio
         if out_request_id:
             payload["user"] = out_request_id

@@ -202,10 +202,12 @@ class ZhiYiImageToImageNode:
             "stream": False,
             "model": model,
             "messages": messages,
-            "imageConfig": {"aspect_ratio": aspect_ratio, "image_size": image_size},
+            "imageConfig": {"image_size": image_size},
             "modalities": ["image"],
             "user": out_request_id,
         }
+        if aspect_ratio and aspect_ratio != "auto":
+            payload["imageConfig"]["aspect_ratio"] = aspect_ratio
         if model not in self.MODELS_NO_SEED:
             payload["seed"] = seed
         logger.info(
