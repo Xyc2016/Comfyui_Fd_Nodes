@@ -18,13 +18,18 @@ from src.Comfyui_Fd_Nodes.nodes import (
 )
 from src.Comfyui_Fd_Nodes.prompt_nodes import EcommercePromptGenerator, PromptListSelector
 from src.Comfyui_Fd_Nodes import zhiyi_image_text_node as zhiyi_image_text_module
-from src.Comfyui_Fd_Nodes import zhiyi_image_to_image_node as zhiyi_image_to_image_module
 from src.Comfyui_Fd_Nodes import zhiyi_text_node as zhiyi_text_module
 from src.Comfyui_Fd_Nodes.zhiyi_image_text_node import ZhiYiImageTextNode
 from src.Comfyui_Fd_Nodes.zhiyi_image_to_image_combo_node import ZhiYiImageToImageComboNode
 from src.Comfyui_Fd_Nodes.zhiyi_image_to_image_node import ZhiYiImageToImageNode
 from src.Comfyui_Fd_Nodes.zhiyi_text_node import ZhiYiTextGenNode
 from src.Comfyui_Fd_Nodes.utils.error_utils import normalize_error_message
+from src.Comfyui_Fd_Nodes.utils.gemini_service import (
+    GeminiImageServiceClient,
+    compose_prompt,
+    normalize_gemini_model_name,
+)
+from src.Comfyui_Fd_Nodes.utils.litellm_gemini_image import should_use_litellm_gemini
 from src.Comfyui_Fd_Nodes.utils.logging_utils import (
     DEFAULT_LOG_DATE_FORMAT,
     DEFAULT_LOG_FORMAT,
@@ -109,88 +114,118 @@ def test_zhiyi_image_to_image_exposes_out_request_id():
     assert optional_inputs["out_request_id"][1]["default"] == "default"
 
 
-def test_zhiyi_image_to_image_request_logs_request_and_response_without_images(monkeypatch):
-    """The image-to-image API should log request/response summaries without image payloads."""
-    node = ZhiYiImageToImageNode()
-    captured_logs = []
+def test_gemini_service_builds_internal_request_body():
+    client = GeminiImageServiceClient(service_url="https://gemini.internal", oss_url_prefix="https://oss/")
 
-    class DummyResponse:
-        ok = True
-        status_code = 200
-        text = '{"choices":[{"finish_reason":"stop","message":{"images":[{"image_url":{"url":"https://example.com/img.png"}}]}}]}'
-
-        def json(self):
-            return {
-                "choices": [
-                    {
-                        "finish_reason": "stop",
-                        "message": {
-                            "images": [
-                                {"image_url": {"url": "https://example.com/img.png"}}
-                            ]
-                        },
-                    }
-                ]
-            }
-
-    def fake_post(url, headers, data, timeout):
-        captured_logs.append(("post_payload", json.loads(data)))
-        return DummyResponse()
-
-    def fake_extract(_result):
-        return "data:image/png;base64,ZmFrZQ=="
-
-    def fake_base64_to_tensor(data_url):
-        captured_logs.append(("data_url", data_url))
-        return "fake-tensor"
-
-    def fake_logger_info(message, *args):
-        captured_logs.append((message, args))
-
-    monkeypatch.setattr(zhiyi_image_to_image_module.requests, "post", fake_post)
-    monkeypatch.setattr(node, "_extract_image_from_response", fake_extract)
-    monkeypatch.setattr(node, "_base64_to_tensor", fake_base64_to_tensor)
-    monkeypatch.setattr(zhiyi_image_to_image_module.logger, "info", fake_logger_info)
-
-    messages = [
-        {"role": "system", "content": [{"type": "text", "text": "system prompt"}]},
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "user prompt"},
-                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}},
-            ],
-        },
-    ]
-
-    result = node._single_request(
-        url="https://example.com/v1/chat/completions",
-        api_key="secret",
-        out_request_id="req-123",
-        messages=messages,
-        model="custom-model",
+    body = client.build_request_body(
+        prompt="draw product",
+        model="gemini-3-pro-image-preview",
+        image_url_list=["https://oss/input.png"],
         aspect_ratio="1:1",
         image_size="4K",
-        seed=42,
+        out_request_id="req-123",
     )
 
-    assert result == "fake-tensor"
-    request_payload = next(value for key, value in captured_logs if key == "post_payload")
-    assert request_payload["user"] == "req-123"
-    assert request_payload["seed"] == 42
+    assert body == {
+        "out_request_id": "req-123",
+        "prompt": "draw product",
+        "model": "google/gemini-3-pro-image-preview",
+        "aspect_ratio": "1:1",
+        "image_url_list": ["https://oss/input.png"],
+        "resolution": "4K",
+    }
+    assert client.summarize_request_body(body)["image_count"] == 1
 
-    request_log = next(args[0] for message, args in captured_logs if message == "Calling ZhiYi image-to-image API with payload=%s")
-    assert request_log["user"] == "req-123"
-    assert request_log["messages"] == [
-        {"role": "system", "text": "system prompt"},
-        {"role": "user", "text": "user prompt", "image_count": 1},
-    ]
-    assert "data:image/png;base64,AAA" not in json.dumps(request_log, ensure_ascii=False)
 
-    response_log = next(args[0] for message, args in captured_logs if message == "ZhiYi image-to-image API response summary: %s")
-    assert response_log["status_code"] == 200
-    assert response_log["choice_count"] == 1
-    assert response_log["image_count"] == 1
+def test_gemini_service_model_and_prompt_helpers():
+    assert normalize_gemini_model_name("gemini-2.5-flash-image-preview") == "google/gemini-2.5-flash-image-preview"
+    assert normalize_gemini_model_name("google/gemini-3-pro-image-preview") == "google/gemini-3-pro-image-preview"
+    assert should_use_litellm_gemini("gemini-3-pro-image-preview-aistudio") is True
+    assert should_use_litellm_gemini("gemini-3-pro-image-preview-siphonlab") is True
+    assert should_use_litellm_gemini("gemini-3-pro-image-preview") is False
+    assert compose_prompt("user prompt", "system prompt") == "system prompt\n\nuser prompt"
+    assert compose_prompt("user prompt", "") == "user prompt"
+
+
+def test_zhiyi_image_to_image_uses_internal_gemini_service(monkeypatch):
+    node = ZhiYiImageToImageNode()
+    calls = []
+
+    class FakeClient:
+        def upload_images(self, image_tensors):
+            calls.append(("upload_images", len(image_tensors)))
+            return ["https://oss/input.png"]
+
+        def call_with_image_urls(self, **kwargs):
+            calls.append(("call", kwargs))
+            return torch.ones((1, 2, 2, 3), dtype=torch.float32), "https://oss/result.png", "ok"
+
+    node.gemini_client = FakeClient()
+
+    result, actual_seed = node.generate(
+        image_1=torch.zeros((1, 2, 2, 3), dtype=torch.float32),
+        prompt="user prompt",
+        model="gemini-3-pro-image-preview",
+        aspect_ratio="1:1",
+        image_size="4K",
+        batch_size=1,
+        seed_mode="固定种子",
+        seed=42,
+        out_request_id="req-123",
+        system_prompt="system prompt",
+    )
+
+    assert result.shape == (1, 2, 2, 3)
+    assert actual_seed == 42
+    assert calls[0] == ("upload_images", 1)
+    request = calls[1][1]
+    assert request["image_url_list"] == ["https://oss/input.png"]
+    assert request["prompt"] == "system prompt\n\nuser prompt"
+    assert request["model"] == "gemini-3-pro-image-preview"
+    assert request["aspect_ratio"] == "1:1"
+    assert request["image_size"] == "4K"
+    assert request["out_request_id"] == "req-123"
+
+
+def test_zhiyi_image_to_image_aistudio_uses_litellm_without_model_rename(monkeypatch):
+    node = ZhiYiImageToImageNode()
+    calls = []
+
+    monkeypatch.setattr("src.Comfyui_Fd_Nodes.zhiyi_image_to_image_node.tensor_to_base64", lambda _tensor: "AAA")
+
+    def fake_litellm(messages, model, aspect_ratio, image_size, seed, out_request_id):
+        calls.append({
+            "messages": messages,
+            "model": model,
+            "aspect_ratio": aspect_ratio,
+            "image_size": image_size,
+            "seed": seed,
+            "out_request_id": out_request_id,
+        })
+        return torch.ones((1, 2, 2, 3), dtype=torch.float32)
+
+    monkeypatch.setattr(node, "_single_litellm_request", fake_litellm)
+    monkeypatch.setattr(node.gemini_client, "upload_images", lambda _image_tensors: pytest.fail("aistudio should not upload images to Gemini service"))
+
+    result, actual_seed = node.generate(
+        image_1=torch.zeros((1, 2, 2, 3), dtype=torch.float32),
+        prompt="user prompt",
+        model="gemini-3-pro-image-preview-aistudio",
+        aspect_ratio="1:1",
+        image_size="4K",
+        batch_size=1,
+        seed_mode="固定种子",
+        seed=42,
+        out_request_id="req-123",
+        system_prompt="system prompt",
+    )
+
+    assert result.shape == (1, 2, 2, 3)
+    assert actual_seed == 42
+    assert calls[0]["model"] == "gemini-3-pro-image-preview-aistudio"
+    assert calls[0]["messages"][0]["role"] == "system"
+    assert calls[0]["messages"][1]["content"][0]["text"] == "user prompt"
+    assert calls[0]["messages"][1]["content"][1]["image_url"]["url"] == "data:image/png;base64,AAA"
 
 
 def test_normalize_error_message_classifies_timeout_and_nsfw():
@@ -203,8 +238,7 @@ def test_zhiyi_image_to_image_generate_returns_last_actual_error(monkeypatch):
     node = ZhiYiImageToImageNode()
     image = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
 
-    monkeypatch.setattr(zhiyi_image_to_image_module, "load_config", lambda: {"base_url": "https://example.com", "api_key": "secret"})
-    monkeypatch.setattr(node, "_tensor_to_base64", lambda _tensor: "AAA")
+    monkeypatch.setattr(node.gemini_client, "upload_images", lambda _image_tensors: ["https://oss/input.png"])
     monkeypatch.setattr(
         node,
         "_run_concurrent",
@@ -253,7 +287,7 @@ def test_zhiyi_image_to_image_combo_generate_returns_last_actual_error(monkeypat
         "_run_concurrent",
         lambda tasks, max_workers, label="任务": ([None] * len(tasks), ["[请求 1] 失败"], "UNKNOWN: API 请求失败: 500\ninternal error"),
     )
-    monkeypatch.setattr(node, "_tensor_to_base64", lambda _tensor: "AAA")
+    monkeypatch.setattr(node.gemini_client, "upload_images", lambda _image_tensors: ["https://oss/input.png"])
 
     with pytest.raises(RuntimeError, match=r"^UNKNOWN: API 请求失败: 500"):
         node.generate(
@@ -264,6 +298,90 @@ def test_zhiyi_image_to_image_combo_generate_returns_last_actual_error(monkeypat
             max_concurrency=1,
             combo_1=combo,
         )
+
+
+def test_zhiyi_image_to_image_combo_uses_internal_gemini_service(monkeypatch):
+    node = ZhiYiImageToImageComboNode()
+    node.gemini_client.service_url = "https://gemini.internal/generate"
+    combo = {
+        "images": [torch.zeros((1, 2, 2, 3), dtype=torch.float32)],
+        "prompts": ["prompt one", "prompt two"],
+    }
+    calls = []
+
+    monkeypatch.setattr(node.gemini_client, "upload_images", lambda image_tensors: ["https://oss/input.png"])
+
+    def fake_single_request(*args):
+        calls.append(args)
+        return torch.ones((1, 2, 2, 3), dtype=torch.float32)
+
+    monkeypatch.setattr(node, "_single_request", fake_single_request)
+
+    images, actual_seed, log_text = node.generate(
+        model=ZhiYiImageToImageComboNode.MODELS[0],
+        aspect_ratio="1:1",
+        image_size="4K",
+        batch_size=1,
+        max_concurrency=1,
+        seed_mode="固定种子",
+        seed=7,
+        out_request_id="req-456",
+        combo_1=combo,
+        system_prompt="system prompt",
+    )
+
+    assert len(images) == 2
+    assert actual_seed == 7
+    assert "url=https://gemini.internal/generate" in log_text
+    assert calls[0] == (
+        ["https://oss/input.png"],
+        "system prompt\n\nprompt one",
+        ZhiYiImageToImageComboNode.MODELS[0],
+        "1:1",
+        "4K",
+        7,
+        "req-456",
+    )
+    assert calls[1][1] == "system prompt\n\nprompt two"
+
+
+def test_zhiyi_image_to_image_combo_siphonlab_uses_litellm_without_model_rename(monkeypatch):
+    node = ZhiYiImageToImageComboNode()
+    combo = {
+        "images": [torch.zeros((1, 2, 2, 3), dtype=torch.float32)],
+        "prompts": ["prompt one"],
+    }
+    calls = []
+
+    monkeypatch.setattr("src.Comfyui_Fd_Nodes.zhiyi_image_to_image_combo_node.tensor_to_base64", lambda _tensor: "AAA")
+    monkeypatch.setattr(node.gemini_client, "upload_images", lambda _image_tensors: pytest.fail("siphonlab should not upload images to Gemini service"))
+
+    def fake_litellm(*args):
+        calls.append(args)
+        return torch.ones((1, 2, 2, 3), dtype=torch.float32)
+
+    monkeypatch.setattr(node, "_single_litellm_request", fake_litellm)
+
+    images, actual_seed, log_text = node.generate(
+        model="gemini-3-pro-image-preview-siphonlab",
+        aspect_ratio="1:1",
+        image_size="4K",
+        batch_size=1,
+        max_concurrency=1,
+        seed_mode="固定种子",
+        seed=7,
+        out_request_id="req-456",
+        combo_1=combo,
+        system_prompt="system prompt",
+    )
+
+    assert len(images) == 1
+    assert actual_seed == 7
+    assert "FD_LITELLM_BASE_URL/v1/chat/completions" in log_text
+    assert calls[0][1] == "gemini-3-pro-image-preview-siphonlab"
+    assert calls[0][0][0]["role"] == "system"
+    assert calls[0][0][1]["content"][0]["text"] == "prompt one"
+    assert calls[0][0][1]["content"][1]["image_url"]["url"] == "data:image/png;base64,AAA"
 
 
 def test_zhiyi_image_text_request_logs_request_and_response_without_images(monkeypatch):

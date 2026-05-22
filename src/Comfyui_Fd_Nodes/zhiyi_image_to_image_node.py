@@ -1,22 +1,19 @@
-import requests
-import json
-import base64
+import logging
 import random
-import numpy as np
-import os
-from PIL import Image
-import io
-import torch
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from .config_manager import load_config
-from .utils.error_utils import ERROR_NSFW, ERROR_TIMEOUT, normalize_error_message
-from .utils.logging_utils import configure_default_logging
-import logging
-from .config import (
-    FD_LITELLM_API_KEY,
-    FD_LITELLM_BASE_URL,
+
+import torch
+
+from .utils.error_utils import normalize_error_message
+from .utils.gemini_service import GeminiImageServiceClient, compose_prompt
+from .utils.litellm_gemini_image import (
+    build_litellm_messages,
+    call_litellm_gemini_image,
+    should_use_litellm_gemini,
+    tensor_to_base64,
 )
+from .utils.logging_utils import configure_default_logging
 
 configure_default_logging()
 logger = logging.getLogger(__name__)
@@ -93,182 +90,29 @@ class ZhiYiImageToImageNode:
     CATEGORY = "知衣/图生图"
     OUTPUT_NODE = False
 
-    def _tensor_to_base64(self, image_tensor):
-        arr = (image_tensor[0].numpy() * 255).clip(0, 255).astype(np.uint8)
-        pil_img = Image.fromarray(arr)
-        buf = io.BytesIO()
-        pil_img.save(buf, format="PNG")
-        return base64.b64encode(buf.getvalue()).decode("utf-8")
+    def __init__(self):
+        self.gemini_client = GeminiImageServiceClient()
 
-    def _base64_to_tensor(self, data_url):
-        if ";base64," in data_url:
-            _, b64 = data_url.split(";base64,", 1)
-        else:
-            b64 = data_url
-        img_bytes = base64.b64decode(b64)
-        pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        arr = np.array(pil_img).astype(np.float32) / 255.0
-        return torch.from_numpy(arr).unsqueeze(0)
-
-    def _summarize_messages_for_log(self, messages):
-        summarized_messages = []
-        for message in messages:
-            summarized_message = {"role": message.get("role", "")}
-            content = message.get("content", [])
-            if isinstance(content, list):
-                text_parts = []
-                image_count = 0
-                for part in content:
-                    if not isinstance(part, dict):
-                        continue
-                    if part.get("type") == "text":
-                        text = part.get("text", "").strip()
-                        if text:
-                            text_parts.append(text)
-                    elif part.get("type") in {"image_url", "image"}:
-                        image_count += 1
-                if text_parts:
-                    summarized_message["text"] = "\n".join(text_parts)
-                if image_count:
-                    summarized_message["image_count"] = image_count
-            else:
-                summarized_message["content"] = content
-            summarized_messages.append(summarized_message)
-        return summarized_messages
-
-    def _summarize_response_for_log(self, result):
-        summary = {"keys": list(result.keys())}
-        choices = result.get("choices", [])
-        summary["choice_count"] = len(choices)
-        if not choices:
-            return summary
-
-        choice = choices[0]
-        summary["finish_reason"] = choice.get("finish_reason")
-        message = choice.get("message", {})
-        summary["message_keys"] = list(message.keys())
-
-        images = message.get("images", [])
-        if isinstance(images, list):
-            summary["image_count"] = len(images)
-
-        content = message.get("content", [])
-        if isinstance(content, list):
-            content_types = []
-            for part in content:
-                if isinstance(part, dict):
-                    part_type = part.get("type")
-                    if part_type:
-                        content_types.append(part_type)
-            if content_types:
-                summary["content_types"] = content_types
-        elif isinstance(content, str):
-            summary["content_length"] = len(content)
-
-        return summary
-
-    def _extract_image_from_response(self, result):
-        choice = result["choices"][0]
-        if choice.get("finish_reason") == "content_filter":
-            raise RuntimeError(
-                normalize_error_message(
-                    "内容被过滤 (content_filter)，请修改提示词或输入图片后重试",
-                    category=ERROR_NSFW,
-                )
-            )
-        msg = choice["message"]
-
-        if "images" in msg and msg["images"]:
-            return msg["images"][0]["image_url"]["url"]
-
-        content = msg.get("content", [])
-        if isinstance(content, list):
-            for part in content:
-                if isinstance(part, dict):
-                    if part.get("type") == "image_url":
-                        return part["image_url"]["url"]
-                    if part.get("type") == "image":
-                        return part.get("url") or part.get("data", "")
-
-        if isinstance(content, str) and len(content) > 100:
-            return content
-
-        raise KeyError(f"无法从响应中提取图片，响应结构: {list(msg.keys())}")
-
-    MODELS_NO_SEED = {"gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview", "gemini-3-pro-image-preview-aistudio"}
-
-    def _single_request(self, url, api_key, messages, model, aspect_ratio, image_size, seed, out_request_id="default"):
-        payload = {
-            "stream": False,
-            "model": model,
-            "messages": messages,
-            "imageConfig": {"image_size": image_size},
-            "modalities": ["image"],
-            "user": out_request_id,
-        }
-        if aspect_ratio and aspect_ratio != "auto":
-            payload["imageConfig"]["aspect_ratio"] = aspect_ratio
-        if model not in self.MODELS_NO_SEED:
-            payload["seed"] = seed
-        logger.info(
-            "Calling ZhiYi image-to-image API with payload=%s",
-            {
-                "url": url,
-                "stream": payload["stream"],
-                "model": payload["model"],
-                "imageConfig": payload["imageConfig"],
-                "modalities": payload["modalities"],
-                "user": payload["user"],
-                "seed": payload.get("seed"),
-                "messages": self._summarize_messages_for_log(messages),
-            },
+    def _single_request(self, image_url_list, prompt, model, aspect_ratio, image_size, seed, out_request_id="default"):
+        image, _result_url, _message = self.gemini_client.call_with_image_urls(
+            prompt=prompt,
+            model=model,
+            image_url_list=image_url_list,
+            aspect_ratio=aspect_ratio,
+            image_size=image_size,
+            out_request_id=out_request_id,
         )
-        try:
-            response = requests.post(
-                url=url,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                data=json.dumps(payload),
-                timeout=600,
-            )
-            if not response.ok:
-                raise RuntimeError(f"API 请求失败: {response.status_code}\n{response.text[:1000]}")
-            result = response.json()
-            logger.info(
-                "ZhiYi image-to-image API response summary: %s",
-                {
-                    "status_code": response.status_code,
-                    **self._summarize_response_for_log(result),
-                },
-            )
-            out_data_url = self._extract_image_from_response(result)
-        except (KeyError, IndexError) as e:
-            raise RuntimeError(normalize_error_message(f"解析响应失败: {e}\n原始响应: {response.text[:500]}"))
-        except requests.exceptions.Timeout as exc:
-            raise RuntimeError(
-                normalize_error_message(exc, category=ERROR_TIMEOUT, fallback_detail="request timed out")
-            ) from exc
-        except Exception as exc:
-            raise RuntimeError(normalize_error_message(exc)) from exc
-        return self._base64_to_tensor(out_data_url)
+        return image
 
-    def _build_messages(self, prompt, image_b64_list, system_prompt):
-        messages = []
-        if system_prompt.strip():
-            messages.append({
-                "role": "system",
-                "content": [{"type": "text", "text": system_prompt}],
-            })
-        user_content = [{"type": "text", "text": prompt}]
-        for b64 in image_b64_list:
-            user_content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/png;base64,{b64}"},
-            })
-        messages.append({"role": "user", "content": user_content})
-        return messages
+    def _single_litellm_request(self, messages, model, aspect_ratio, image_size, seed, out_request_id="default"):
+        return call_litellm_gemini_image(
+            messages=messages,
+            model=model,
+            aspect_ratio=aspect_ratio,
+            image_size=image_size,
+            seed=seed,
+            out_request_id=out_request_id,
+        )
 
     def _run_concurrent(self, tasks, label="任务"):
         """tasks: list of (idx, callable, args)，并发执行，返回 {idx: result}"""
@@ -304,16 +148,16 @@ class ZhiYiImageToImageNode:
             empty = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
             return (empty, 0)
 
-        cfg = load_config()
-        base_url = (FD_LITELLM_BASE_URL or cfg["base_url"]).rstrip("/")
-        api_key = FD_LITELLM_API_KEY or cfg["api_key"]
-        url = f"{base_url}/v1/chat/completions"
-
         actual_seed = random.randint(0, 2147483647) if seed_mode == "随机种子" else seed
 
-        # 预先编码所有图片（共享，避免重复编码）
         image_tensors = [t for t in [image_1, image_2, image_3, image_4, image_5, image_6] if t is not None]
-        image_b64_list = [self._tensor_to_base64(t) for t in image_tensors]
+        use_litellm = should_use_litellm_gemini(model)
+        if use_litellm:
+            image_b64_list = [tensor_to_base64(t) for t in image_tensors]
+            image_url_list = None
+        else:
+            image_url_list = self.gemini_client.upload_images(image_tensors)
+            image_b64_list = None
 
         # 有效提示词列表；字符串输入按单条 prompt 处理，避免被逐字符拆分
         if isinstance(prompt_list, str):
@@ -329,10 +173,16 @@ class ZhiYiImageToImageNode:
         tasks = []
         task_idx = 0
         for p_idx, p in enumerate(prompts):
-            messages = self._build_messages(p, image_b64_list, system_prompt)
+            if use_litellm:
+                messages = build_litellm_messages(p, image_b64_list, system_prompt)
+            else:
+                final_prompt = compose_prompt(p, system_prompt)
             for b_idx in range(batch_size):
                 s = (actual_seed + p_idx * batch_size + b_idx) if seed_mode == "固定种子" else random.randint(0, 2147483647)
-                tasks.append((task_idx, self._single_request, (url, api_key, messages, model, aspect_ratio or None, image_size, s, out_request_id)))
+                if use_litellm:
+                    tasks.append((task_idx, self._single_litellm_request, (messages, model, aspect_ratio or None, image_size, s, out_request_id)))
+                else:
+                    tasks.append((task_idx, self._single_request, (image_url_list, final_prompt, model, aspect_ratio or None, image_size, s, out_request_id)))
                 task_idx += 1
 
         logger.info(
