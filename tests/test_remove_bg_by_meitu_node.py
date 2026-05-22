@@ -11,6 +11,7 @@ def test_remove_bg_node_metadata():
     input_types = ZhiYiRemoveBgByMeituNode.INPUT_TYPES()
 
     assert input_types["required"]["images"][0] == "IMAGE"
+    assert input_types["required"]["service_url"][1]["default"].endswith("/image/remove_bg_by_meitu")
     assert input_types["required"]["background_color"][0] == "STRING"
     assert "model" not in input_types["required"]
     assert ZhiYiRemoveBgByMeituNode.RETURN_TYPES == ("IMAGE", "MASK", "IMAGE", "IMAGE")
@@ -200,8 +201,9 @@ def test_remove_bg_returns_successful_batch_and_skips_failures(monkeypatch):
     assert torch.equal(result_image[:, 0, 0, 0], torch.tensor([1.0, 3.0]))
 
 
-def test_remove_bg_requires_service_url():
+def test_remove_bg_requires_service_url_when_no_default_is_available(monkeypatch):
     node = ZhiYiRemoveBgByMeituNode()
+    monkeypatch.setattr(remove_bg_module, "FD_REMOVE_BG_BY_MEITU_URL", "")
 
     with pytest.raises(RuntimeError, match="FD_REMOVE_BG_BY_MEITU_URL"):
         node.remove_bg(
@@ -217,3 +219,46 @@ def test_remove_bg_requires_service_url():
             max_concurrency=1,
             timeout=30,
         )
+
+
+def test_remove_bg_uses_default_service_url_when_input_is_blank(monkeypatch):
+    node = ZhiYiRemoveBgByMeituNode()
+    images = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
+    captured = []
+    monkeypatch.setattr(
+        remove_bg_module,
+        "FD_REMOVE_BG_BY_MEITU_URL",
+        "http://image-server-internal.zhiyi.com.cn/api-server-gray/detail-image/image/remove_bg_by_meitu",
+    )
+
+    def fake_run_concurrent(tasks, max_workers):
+        idx, fn, args = tasks[0]
+        captured.append((idx, fn, args, max_workers))
+        return (
+            [{
+                "result_image": torch.ones((1, 2, 2, 3), dtype=torch.float32),
+                "mask": torch.ones((1, 2, 2), dtype=torch.float32),
+                "mask_image": torch.ones((1, 2, 2, 3), dtype=torch.float32),
+                "red_edge_image": torch.ones((1, 2, 2, 3), dtype=torch.float32),
+            }],
+            ["ok"],
+            None,
+        )
+
+    monkeypatch.setattr(node, "_run_concurrent", fake_run_concurrent)
+
+    node.remove_bg(
+        images=images,
+        service_url="",
+        repaint_edge=True,
+        edge_thickness=40,
+        mask_blur=0,
+        mask_offset=0,
+        invert_output=False,
+        background="Alpha",
+        background_color="#222222",
+        max_concurrency=1,
+        timeout=30,
+    )
+
+    assert captured[0][2][2] == "http://image-server-internal.zhiyi.com.cn/api-server-gray/detail-image/image/remove_bg_by_meitu"

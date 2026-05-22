@@ -403,7 +403,7 @@ class ZhiYiRemoveBgByMeituNode:
         max_concurrency,
         timeout,
     ):
-        service_url = (service_url or "").strip()
+        service_url = (service_url or FD_REMOVE_BG_BY_MEITU_URL or "").strip()
         if not service_url:
             raise RuntimeError("未配置美图抠图服务地址，请设置 FD_REMOVE_BG_BY_MEITU_URL 或在节点 service_url 中填写完整接口地址")
 
