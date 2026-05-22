@@ -1,12 +1,10 @@
 import io
 import hashlib
-import os
 from PIL import Image
 import torch
 import numpy as np
 from io import BytesIO
 import math
-from comfy.utils import common_upscale
 
 
 def pil2iobyte(pil_image,format='PNG'):
@@ -33,6 +31,8 @@ def bytesio_to_image_tensor(image_bytesio: BytesIO, mode: str = "RGBA") -> torch
 
 def downscale_image_tensor(image, *, total_pixels: int) -> torch.Tensor:
     """Downscale input image tensor to roughly the specified total pixels."""
+    from comfy.utils import common_upscale
+
     samples = image.movedim(-1, 1)
     total = int(total_pixels)
     scale_by = math.sqrt(total / (samples.shape[3] * samples.shape[2]))
