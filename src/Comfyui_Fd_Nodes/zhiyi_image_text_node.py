@@ -11,6 +11,11 @@ from .utils.logging_utils import configure_default_logging
 configure_default_logging()
 logger = logging.getLogger(__name__)
 
+MAX_IMAGE_DATA_URL_BYTES = 10_000_000
+JPEG_QUALITY_STEPS = (85, 80, 75, 70, 65, 60)
+MIN_IMAGE_LONG_EDGE = 1024
+IMAGE_RESIZE_FACTOR = 0.8
+
 
 class ZhiYiImageTextNode:
     """知衣图生文节点 - 传入图片，调用 Gemini 模型生成描述文本"""
@@ -58,12 +63,66 @@ class ZhiYiImageTextNode:
     CATEGORY = "知衣/图生文"
     OUTPUT_NODE = False
 
-    def _image_tensor_to_base64(self, image_tensor):
-        arr = (image_tensor[0].numpy() * 255).clip(0, 255).astype(np.uint8)
-        pil_img = Image.fromarray(arr)
+    def _image_tensor_to_pil(self, image_tensor):
+        if getattr(image_tensor, "ndim", None) == 4:
+            image_tensor = image_tensor[0]
+        arr = (image_tensor.detach().cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+        return Image.fromarray(arr).convert("RGB")
+
+    def _encode_jpeg_data_url(self, pil_img, quality):
         buf = io.BytesIO()
-        pil_img.save(buf, format="PNG")
-        return base64.b64encode(buf.getvalue()).decode("utf-8")
+        pil_img.save(buf, format="JPEG", quality=quality, optimize=True)
+        img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+        return f"data:image/jpeg;base64,{img_b64}", len(buf.getvalue())
+
+    def _resize_to_long_edge(self, pil_img, long_edge):
+        width, height = pil_img.size
+        current_long_edge = max(width, height)
+        if current_long_edge <= long_edge:
+            return pil_img
+
+        scale = long_edge / current_long_edge
+        new_size = (
+            max(1, int(round(width * scale))),
+            max(1, int(round(height * scale))),
+        )
+        return pil_img.resize(new_size, Image.Resampling.LANCZOS)
+
+    def _image_tensor_to_data_url(self, image_tensor):
+        original_img = self._image_tensor_to_pil(image_tensor)
+        original_size = original_img.size
+        current_long_edge = max(original_size)
+        best_result = None
+
+        while True:
+            candidate_img = self._resize_to_long_edge(original_img, current_long_edge)
+            for quality in JPEG_QUALITY_STEPS:
+                data_url, image_bytes = self._encode_jpeg_data_url(candidate_img, quality)
+                data_url_bytes = len(data_url.encode("utf-8"))
+                info = {
+                    "original_size": original_size,
+                    "final_size": candidate_img.size,
+                    "mime_type": "image/jpeg",
+                    "quality": quality,
+                    "image_bytes": image_bytes,
+                    "data_url_bytes": data_url_bytes,
+                    "max_data_url_bytes": MAX_IMAGE_DATA_URL_BYTES,
+                    "resized": candidate_img.size != original_size,
+                }
+                best_result = (data_url, info)
+                if data_url_bytes <= MAX_IMAGE_DATA_URL_BYTES:
+                    return best_result
+
+            if current_long_edge <= MIN_IMAGE_LONG_EDGE:
+                break
+            current_long_edge = max(MIN_IMAGE_LONG_EDGE, int(current_long_edge * IMAGE_RESIZE_FACTOR))
+
+        _, info = best_result
+        raise RuntimeError(
+            "图生文输入图片压缩后仍超过 10MB 传输限制: "
+            f"{info['data_url_bytes']} bytes > {MAX_IMAGE_DATA_URL_BYTES} bytes; "
+            "请降低输入图片分辨率后重试"
+        )
 
     def _summarize_messages_for_log(self, messages):
         summarized_messages = []
@@ -120,8 +179,8 @@ class ZhiYiImageTextNode:
         base_url = base_url.rstrip("/")
         url = f"{base_url}/v1/chat/completions"
 
-        img_b64 = self._image_tensor_to_base64(image)
-        data_url = f"data:image/png;base64,{img_b64}"
+        data_url, image_info = self._image_tensor_to_data_url(image)
+        logger.info("ZhiYi image-to-text encoded image: %s", image_info)
 
         messages = []
         if system_prompt.strip():

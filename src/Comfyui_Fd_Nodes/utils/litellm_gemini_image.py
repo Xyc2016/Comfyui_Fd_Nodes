@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 
 LITELLM_GEMINI_MODELS = {
-    "gemini-3-pro-image-preview-aistudio",
     "gemini-3-pro-image-preview-siphonlab",
 }
 

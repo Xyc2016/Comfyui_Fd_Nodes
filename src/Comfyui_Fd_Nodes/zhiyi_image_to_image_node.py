@@ -23,10 +23,16 @@ class ZhiYiImageToImageNode:
     """知衣图生图节点 - 最多6张输入图片，batch_size 控制重复请求次数，支持提示词列表并发"""
 
     MODELS = [
+        "google/gemini-3-pro-image-preview",
+        "google/gemini-3.1-flash-image-preview",
+        "google/gemini-2.5-flash-image-preview",
+        "google/gemini-3-pro-image-preview-official",
         "gemini-3-pro-image-preview",
         "gemini-3.1-flash-image-preview",
         "gemini-2.5-flash-image-preview",
+        "gemini-3-pro-image-preview-official",
         "gemini-3-pro-image-preview-aistudio",
+        "gemini-3-pro-image-preview-siphonlab",
     ]
 
     ASPECT_RATIOS = ["", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9"]

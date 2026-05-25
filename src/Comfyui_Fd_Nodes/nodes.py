@@ -2,8 +2,6 @@ import io
 import json
 import logging
 import os
-import random
-import time
 import traceback
 from datetime import datetime
 from inspect import cleandoc
@@ -50,6 +48,7 @@ from .gpt_multi_image_node import FD_GPTMultiImage
 from .prompt_nodes import EcommercePromptGenerator, PromptListSelector
 from .zhiyi_text_node import ZhiYiTextGenNode
 from .zhiyi_image_text_node import ZhiYiImageTextNode
+from .zhiyi_image_text_combo_node import ZhiYiImageTextComboNode
 from .zhiyi_image_to_image_node import ZhiYiImageToImageNode
 from .toggle import NodeToggleByID
 from .utils.logging_utils import configure_default_logging
@@ -57,12 +56,17 @@ from .zhiyi_image_combo_node import ZhiYiImageComboNode
 from .zhiyi_image_to_image_combo_node import ZhiYiImageToImageComboNode
 from .aistudio_image_combo_node import ZhiYiAiStudioImageComboNode
 from .remove_bg_by_meitu_node import ZhiYiRemoveBgByMeituNode
+from .utils.gpt_image_size import resolution_to_edit_size
 
 configure_default_logging()
 logger = logging.getLogger(__name__)
 
 
 FD_REMOVE_WATERMARK_SERVICE_URL = os.getenv("FD_REMOVE_WATERMARK_SERVICE_URL", "http://localhost:8000/v1/process")
+
+
+def _resolution_to_edit_size(resolution: str, aspect_ratio: str) -> str:
+    return resolution_to_edit_size(resolution, aspect_ratio)
 
 
 class FD_RemoveWatermark:
@@ -883,6 +887,7 @@ NODE_CLASS_MAPPINGS = {
     "MaoziEcommercePromptGenerator": EcommercePromptGenerator,
     "MaoziPromptListSelector": PromptListSelector,
     "ZhiYiImageTextNode": ZhiYiImageTextNode,
+    "ZhiYiImageTextComboNode": ZhiYiImageTextComboNode,
     "ZhiYiImageToImageNode": ZhiYiImageToImageNode,
     "ZhiYiTextGenNode": ZhiYiTextGenNode,
     "NodeToggleByID": NodeToggleByID,
@@ -907,6 +912,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MaoziEcommercePromptGenerator": "猫子提示词节点-详情页生成器",
     "MaoziPromptListSelector": "猫子提示词节点-列表选择器",
     "ZhiYiImageTextNode": "知衣-图生文",
+    "ZhiYiImageTextComboNode": "知衣-图生文-combo",
     "ZhiYiImageToImageNode": "知衣-图生图",
     "ZhiYiTextGenNode": "知衣-文生文",
     "NodeToggleByID": "节点开关 (按ID)",

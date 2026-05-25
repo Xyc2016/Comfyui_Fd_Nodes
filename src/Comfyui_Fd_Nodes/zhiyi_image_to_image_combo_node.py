@@ -22,9 +22,14 @@ class ZhiYiImageToImageComboNode:
     """知衣图生图节点 - 接收最多8个图片组合并发调用 API"""
 
     MODELS = [
+        "google/gemini-3-pro-image-preview",
+        "google/gemini-3.1-flash-image-preview",
+        "google/gemini-2.5-flash-image-preview",
+        "google/gemini-3-pro-image-preview-official",
         "gemini-3-pro-image-preview",
         "gemini-3.1-flash-image-preview",
         "gemini-2.5-flash-image-preview",
+        "gemini-3-pro-image-preview-official",
         "gemini-3-pro-image-preview-aistudio",
         "gemini-3-pro-image-preview-siphonlab",
     ]
