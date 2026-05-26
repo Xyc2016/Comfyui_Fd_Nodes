@@ -56,6 +56,7 @@ from .zhiyi_image_combo_node import ZhiYiImageComboNode
 from .zhiyi_image_to_image_combo_node import ZhiYiImageToImageComboNode
 from .aistudio_image_combo_node import ZhiYiAiStudioImageComboNode
 from .remove_bg_by_meitu_node import ZhiYiRemoveBgByMeituNode
+from .sam2_segment_node import ZhiYiSAM2SegmentNode
 from .zhiyi_qwen_detect_node import ZhiYiBBoxesToSAM2, ZhiYiQwenDetectNode
 from .utils.gpt_image_size import resolution_to_edit_size
 
@@ -896,6 +897,7 @@ NODE_CLASS_MAPPINGS = {
     "ZhiYiImageToImageComboNode": ZhiYiImageToImageComboNode,
     "ZhiYiAiStudioImageComboNode": ZhiYiAiStudioImageComboNode,
     "ZhiYiRemoveBgByMeituNode": ZhiYiRemoveBgByMeituNode,
+    "ZhiYiSAM2SegmentNode": ZhiYiSAM2SegmentNode,
     "ZhiYiQwenDetectNode": ZhiYiQwenDetectNode,
     "ZhiYiBBoxesToSAM2": ZhiYiBBoxesToSAM2,
 }
@@ -923,6 +925,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ZhiYiImageToImageComboNode": "知衣-图生图-combo",
     "ZhiYiAiStudioImageComboNode": "知衣-AiStudio图生图-combo",
     "ZhiYiRemoveBgByMeituNode": "知衣-美图服装抠图",
+    "ZhiYiSAM2SegmentNode": "知衣-SAM2抠图",
     "ZhiYiQwenDetectNode": "知衣-Qwen目标检测",
     "ZhiYiBBoxesToSAM2": "知衣-BBox转SAM2格式",
 }
