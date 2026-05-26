@@ -30,7 +30,7 @@ FD_REMOVE_BG_BY_MEITU_URL = os.getenv(
     "http://image-server-internal.zhiyi.com.cn/api-server-gray/detail-image/image/remove_bg_by_meitu",
 )
 FD_OSS_URL_PATH_PREFIX_REMOVE_BG = os.getenv("FD_OSS_URL_PATH_PREFIX_REMOVE_BG", "devops/comfyui/remove_bg")
-FD_SAM2_SEGMENT_URL = os.getenv("FD_SAM2_SEGMENT_URL", "http://comfyui-model-api-sam2-1-hiera-base-plus-svc:8000/v1/segment")
+FD_SAM2_SEGMENT_URL = os.getenv("FD_SAM2_SEGMENT_URL", "http://model-api-sam2-hiera-base-plus-svc.online-server-gray:8000/v1/segment")
 
 assert FD_LITELLM_BASE_URL, "FD_LITELLM_BASE_URL is not set"
 assert FD_LITELLM_API_KEY, "FD_LITELLM_API_KEY is not set"
