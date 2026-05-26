@@ -10,7 +10,7 @@ from PIL import Image
 
 from .config import FD_LITELLM_API_KEY, FD_LITELLM_BASE_URL
 from .utils.error_utils import ERROR_TIMEOUT, normalize_error_message
-from .utils.litellm_gemini_image import tensor_to_base64
+from .utils.gemini_service import GeminiImageServiceClient
 from .utils.logging_utils import configure_default_logging
 
 configure_default_logging()
@@ -266,6 +266,9 @@ def _build_detection_prompt(target: str) -> str:
 class ZhiYiQwenDetectNode:
     """Use Qwen3-VL-Flash API to detect objects and output bounding boxes."""
 
+    def __init__(self):
+        self.gemini_client = GeminiImageServiceClient()
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -315,9 +318,10 @@ class ZhiYiQwenDetectNode:
         pil_img = Image.fromarray(arr).convert("RGB")
         img_width, img_height = pil_img.size
 
-        # Encode image
-        b64 = tensor_to_base64(image)
-        data_url = f"data:image/png;base64,{b64}"
+        # Upload image first. Some LiteLLM proxies reject base64 data URLs for
+        # vision input, while OSS URLs follow the same path as image generation.
+        upload_tensor = image[0:1] if image.ndim == 4 else image
+        image_url = self.gemini_client.upload_images([upload_tensor])[0]
 
         # Build messages — image before text (per OpenAI vision API convention)
         prompt = _build_detection_prompt(target)
@@ -326,7 +330,7 @@ class ZhiYiQwenDetectNode:
             {
                 "role": "user",
                 "content": [
-                    {"type": "image_url", "image_url": {"url": data_url}},
+                    {"type": "image_url", "image_url": {"url": image_url}},
                     {"type": "text", "text": prompt},
                 ],
             },
@@ -351,8 +355,8 @@ class ZhiYiQwenDetectNode:
         }
 
         logger.info(
-            "Qwen detect API call: url=%s model=%s target=%s img_size=%s",
-            url, model, target, (img_width, img_height),
+            "Qwen detect API call: url=%s model=%s target=%s img_size=%s image_url=%s",
+            url, model, target, (img_width, img_height), image_url,
         )
 
         response = None

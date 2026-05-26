@@ -2,6 +2,9 @@
 
 import json
 
+import torch
+
+from src.Comfyui_Fd_Nodes import zhiyi_qwen_detect_node as qwen_module
 from src.Comfyui_Fd_Nodes.zhiyi_qwen_detect_node import (
     ZhiYiBBoxesToSAM2,
     ZhiYiQwenDetectNode,
@@ -318,3 +321,64 @@ class TestQwenDetectNodeMetadata:
             node_switch=1,
         )
         assert result == ("[]", [], [[]])
+
+    def test_detect_uploads_image_and_sends_oss_url(self, monkeypatch):
+        node = ZhiYiQwenDetectNode()
+        image = torch.zeros((1, 10, 20, 3), dtype=torch.float32)
+        upload_calls = []
+        post_calls = []
+
+        def fake_upload_images(image_tensors):
+            upload_calls.append(image_tensors)
+            return ["https://oss.example.com/qwen-input.png"]
+
+        class DummyResponse:
+            ok = True
+            status_code = 200
+            text = ""
+
+            def json(self):
+                return {
+                    "choices": [
+                        {
+                            "finish_reason": "stop",
+                            "message": {
+                                "content": '[{"bbox_2d":[100,200,500,800],"label":"bag","score":0.9}]',
+                            },
+                        }
+                    ]
+                }
+
+        def fake_post(url, headers, data, timeout):
+            post_calls.append({
+                "url": url,
+                "headers": headers,
+                "payload": json.loads(data),
+                "timeout": timeout,
+            })
+            return DummyResponse()
+
+        monkeypatch.setattr(node.gemini_client, "upload_images", fake_upload_images)
+        monkeypatch.setattr(qwen_module.requests, "post", fake_post)
+
+        json_output, bboxes, bboxes_for_sam2 = node.detect(
+            image=image,
+            target="bag",
+            model="qwen3-vl-flash",
+            score_threshold=0.0,
+            bbox_selection="all",
+            merge_boxes=False,
+            coordinate_format="1000",
+        )
+
+        assert len(upload_calls) == 1
+        assert upload_calls[0][0].shape == (1, 10, 20, 3)
+        image_part = post_calls[0]["payload"]["messages"][1]["content"][0]
+        assert image_part == {
+            "type": "image_url",
+            "image_url": {"url": "https://oss.example.com/qwen-input.png"},
+        }
+        assert not image_part["image_url"]["url"].startswith("data:image/")
+        assert json.loads(json_output) == [{"bbox_2d": [2, 2, 10, 8], "label": "bag"}]
+        assert bboxes == [[2, 2, 10, 8]]
+        assert bboxes_for_sam2 == [[[2, 2, 10, 8]]]
