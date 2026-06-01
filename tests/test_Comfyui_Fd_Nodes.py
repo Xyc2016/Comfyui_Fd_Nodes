@@ -20,6 +20,7 @@ from src.Comfyui_Fd_Nodes.prompt_nodes import EcommercePromptGenerator, PromptLi
 from src.Comfyui_Fd_Nodes import zhiyi_image_text_combo_node as zhiyi_image_text_combo_module
 from src.Comfyui_Fd_Nodes import zhiyi_image_text_node as zhiyi_image_text_module
 from src.Comfyui_Fd_Nodes import zhiyi_text_node as zhiyi_text_module
+from src.Comfyui_Fd_Nodes.old_gemini_api_node import FD_GeminiImage
 from src.Comfyui_Fd_Nodes.zhiyi_image_text_combo_node import ZhiYiImageTextComboNode
 from src.Comfyui_Fd_Nodes.zhiyi_image_text_node import ZhiYiImageTextNode
 from src.Comfyui_Fd_Nodes.zhiyi_image_to_image_combo_node import ZhiYiImageToImageComboNode
@@ -123,12 +124,14 @@ def test_zhiyi_image_to_image_nodes_expose_legacy_and_channel_models():
         "google/gemini-3-pro-image-preview",
         "google/gemini-3-pro-image-preview-official",
         "google/gemini-3.1-flash-image-preview",
+        "batch/gemini-3-pro-image-preview",
         "gemini-3-pro-image-preview-aistudio",
         "gemini-3-pro-image-preview-siphonlab",
     }
 
     assert expected_models.issubset(set(ZhiYiImageToImageNode.MODELS))
     assert expected_models.issubset(set(ZhiYiImageToImageComboNode.MODELS))
+    assert "batch/gemini-3-pro-image-preview" in FD_GeminiImage.INPUT_TYPES()["required"]["model"][1]["options"]
     assert ZhiYiImageToImageNode.INPUT_TYPES()["required"]["model"][1]["default"] == "google/gemini-3-pro-image-preview"
     assert ZhiYiImageToImageComboNode.INPUT_TYPES()["required"]["model"][1]["default"] == "google/gemini-3-pro-image-preview"
 
@@ -155,6 +158,13 @@ def test_gemini_service_builds_internal_request_body():
     }
     assert client.summarize_request_body(body)["image_count"] == 1
 
+    old_batch_body = client.build_request_body(
+        prompt="draw product",
+        model="batch/gemini-3-pro-image-preview",
+        image_url_list=["https://oss/input.png"],
+    )
+    assert old_batch_body["model"] == "batch/gemini-3-pro-image-preview"
+
     aistudio_body = client.build_request_body(
         prompt="draw product",
         model="gemini-3-pro-image-preview-aistudio",
@@ -166,10 +176,12 @@ def test_gemini_service_builds_internal_request_body():
 def test_gemini_service_model_and_prompt_helpers():
     assert normalize_gemini_model_name("gemini-2.5-flash-image-preview") == "google/gemini-2.5-flash-image-preview"
     assert normalize_gemini_model_name("google/gemini-3-pro-image-preview") == "google/gemini-3-pro-image-preview"
+    assert normalize_gemini_model_name("batch/gemini-3-pro-image-preview") == "batch/gemini-3-pro-image-preview"
     assert normalize_gemini_model_name("gemini-3-pro-image-preview-official") == "google/gemini-3-pro-image-preview-official"
     assert normalize_gemini_model_name("google/gemini-3-pro-image-preview-official") == "google/gemini-3-pro-image-preview-official"
     assert normalize_gemini_model_name("gemini-3-pro-image-preview-aistudio") == "google/gemini-3-pro-image-preview-official"
     assert should_use_litellm_gemini("gemini-3-pro-image-preview-aistudio") is False
+    assert should_use_litellm_gemini("batch/gemini-3-pro-image-preview") is False
     assert should_use_litellm_gemini("gemini-3-pro-image-preview-siphonlab") is True
     assert should_use_litellm_gemini("gemini-3-pro-image-preview") is False
     assert compose_prompt("user prompt", "system prompt") == "system prompt\n\nuser prompt"
