@@ -1,4 +1,5 @@
 import os
+from urllib.parse import urlparse, urlunparse
 
 FD_OSS_ACCESS_KEY_ID = os.getenv("FD_OSS_ACCESS_KEY_ID")
 FD_OSS_ACCESS_KEY_SECRET = os.getenv("FD_OSS_ACCESS_KEY_SECRET")
@@ -31,7 +32,34 @@ FD_REMOVE_BG_BY_MEITU_URL = os.getenv(
 )
 FD_OSS_URL_PATH_PREFIX_REMOVE_BG = os.getenv("FD_OSS_URL_PATH_PREFIX_REMOVE_BG", "devops/comfyui/remove_bg")
 FD_SAM2_SEGMENT_URL = os.getenv("FD_SAM2_SEGMENT_URL", "http://model-api-sam2-hiera-base-plus-svc.online-server-gray:8000/v1/segment")
-FD_DWPOSE_POSE_URL = os.getenv("FD_DWPOSE_POSE_URL", "http://model-api-dwpose-svc.online-server-gray:8001/v1/pose")
+DEFAULT_DWPOSE_POSE_URL = "http://model-api-dwpose-svc.online-server-gray:8001/v1/pose"
+FD_DWPOSE_POSE_URL = os.getenv("FD_DWPOSE_POSE_URL") or DEFAULT_DWPOSE_POSE_URL
+
+
+def _derive_dwpose_preprocess_url(endpoint: str) -> str:
+    source_url = (FD_DWPOSE_POSE_URL or DEFAULT_DWPOSE_POSE_URL).strip()
+    if "://" not in source_url:
+        source_url = f"http://{source_url}"
+
+    parsed = urlparse(source_url.rstrip("/"))
+    path = parsed.path.rstrip("/")
+    if not path:
+        path = f"/v1/{endpoint}"
+    elif path.endswith("/v1/pose"):
+        path = f"{path[:-len('/pose')]}/{endpoint}"
+    elif path.endswith("/pose"):
+        base_path = path[:-len("/pose")].rstrip("/")
+        path = f"{base_path}/v1/{endpoint}" if base_path else f"/v1/{endpoint}"
+    elif path.endswith("/v1"):
+        path = f"{path}/{endpoint}"
+    else:
+        path = f"{path}/v1/{endpoint}"
+
+    return urlunparse((parsed.scheme, parsed.netloc, path, "", "", ""))
+
+
+FD_CONTROLNET_AUX_LINEART_URL = os.getenv("FD_CONTROLNET_AUX_LINEART_URL") or _derive_dwpose_preprocess_url("lineart")
+FD_CONTROLNET_AUX_DEPTH_ANYTHING_V2_URL = os.getenv("FD_CONTROLNET_AUX_DEPTH_ANYTHING_V2_URL") or _derive_dwpose_preprocess_url("depth-anything-v2")
 
 assert FD_LITELLM_BASE_URL, "FD_LITELLM_BASE_URL is not set"
 assert FD_LITELLM_API_KEY, "FD_LITELLM_API_KEY is not set"

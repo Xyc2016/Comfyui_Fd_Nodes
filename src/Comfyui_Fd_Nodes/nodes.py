@@ -57,6 +57,7 @@ from .zhiyi_image_to_image_combo_node import ZhiYiImageToImageComboNode
 from .aistudio_image_combo_node import ZhiYiAiStudioImageComboNode
 from .remove_bg_by_meitu_node import ZhiYiRemoveBgByMeituNode
 from .sam2_segment_node import ZhiYiSAM2SegmentNode
+from .zhiyi_controlnet_aux_node import ZhiYiDepthAnythingV2PreprocessorNode, ZhiYiLineArtPreprocessorNode
 from .zhiyi_dwpose_detect_node import ZhiYiDWPoseDetectNode
 from .zhiyi_qwen_detect_node import ZhiYiBBoxesToSAM2, ZhiYiQwenDetectNode
 from .utils.gpt_image_size import resolution_to_edit_size
@@ -900,6 +901,8 @@ NODE_CLASS_MAPPINGS = {
     "ZhiYiRemoveBgByMeituNode": ZhiYiRemoveBgByMeituNode,
     "ZhiYiSAM2SegmentNode": ZhiYiSAM2SegmentNode,
     "ZhiYiDWPoseDetectNode": ZhiYiDWPoseDetectNode,
+    "ZhiYiLineArtPreprocessorNode": ZhiYiLineArtPreprocessorNode,
+    "ZhiYiDepthAnythingV2PreprocessorNode": ZhiYiDepthAnythingV2PreprocessorNode,
     "ZhiYiQwenDetectNode": ZhiYiQwenDetectNode,
     "ZhiYiBBoxesToSAM2": ZhiYiBBoxesToSAM2,
 }
@@ -929,6 +932,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ZhiYiRemoveBgByMeituNode": "知衣-美图服装抠图",
     "ZhiYiSAM2SegmentNode": "知衣-SAM2抠图",
     "ZhiYiDWPoseDetectNode": "知衣-DWPose姿态检测",
+    "ZhiYiLineArtPreprocessorNode": "知衣-LineArt线稿预处理",
+    "ZhiYiDepthAnythingV2PreprocessorNode": "知衣-DepthAnythingV2深度图预处理",
     "ZhiYiQwenDetectNode": "知衣-Qwen目标检测",
     "ZhiYiBBoxesToSAM2": "知衣-BBox转SAM2格式",
 }
