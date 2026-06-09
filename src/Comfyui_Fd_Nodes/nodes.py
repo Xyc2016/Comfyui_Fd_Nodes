@@ -45,6 +45,7 @@ from .utils.webhook import webhook_send
 from .gpt_image_node import FD_GTPImage
 from .gpt_image_combo_node import FD_GPTImageComboNode
 from .gpt_multi_image_node import FD_GPTMultiImage
+from .seedream_image_combo_node import FD_SeedreamImageComboNode
 from .prompt_nodes import EcommercePromptGenerator, PromptListSelector
 from .zhiyi_text_node import ZhiYiTextGenNode
 from .zhiyi_image_text_node import ZhiYiImageTextNode
@@ -888,6 +889,7 @@ NODE_CLASS_MAPPINGS = {
     "FD_Flux2KleinGenImage": FD_Flux2KleinGenImage,
     "FD_ZImageTurboGenImage": FD_ZImageTurboGenImage,
     "FD_SeedreamImage": FD_SeedreamImage,
+    "FD_SeedreamImageComboNode": FD_SeedreamImageComboNode,
     "MaoziEcommercePromptGenerator": EcommercePromptGenerator,
     "MaoziPromptListSelector": PromptListSelector,
     "ZhiYiImageTextNode": ZhiYiImageTextNode,
@@ -919,6 +921,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FD_Flux2KleinGenImage": "FD Flux2Klein Gen Image",
     "FD_ZImageTurboGenImage": "FD Z-Image-Turbo Gen Image",
     "FD_SeedreamImage": "FD Seedream Image",
+    "FD_SeedreamImageComboNode": "FD Seedream Image Combo",
     "MaoziEcommercePromptGenerator": "猫子提示词节点-详情页生成器",
     "MaoziPromptListSelector": "猫子提示词节点-列表选择器",
     "ZhiYiImageTextNode": "知衣-图生文",
