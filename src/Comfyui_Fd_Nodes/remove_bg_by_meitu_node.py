@@ -1,29 +1,23 @@
 import io
 import logging
-import threading
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 
 import numpy as np
-import oss2
 import requests
 import torch
 from PIL import Image, ImageColor, ImageFilter
 
 from .config import (
-    FD_OSS_ACCESS_KEY_ID,
-    FD_OSS_ACCESS_KEY_SECRET,
-    FD_OSS_BUCKET_NAME,
-    FD_OSS_ENDPOINT,
     FD_OSS_URL_PATH_PREFIX_REMOVE_BG,
-    FD_OSS_URL_PREFIX,
     FD_REMOVE_BG_BY_MEITU_URL,
 )
 from .utils.common_util import bytes_calculate_hex_md5, bytesio_to_image_tensor
 from .utils.error_utils import normalize_error_message
 from .utils.logging_utils import configure_default_logging
+from .utils.oss_client import upload_bytes_to_oss
 
 configure_default_logging()
 logger = logging.getLogger(__name__)
@@ -86,41 +80,7 @@ class ZhiYiRemoveBgByMeituNode:
     OUTPUT_NODE = False
 
     def __init__(self):
-        self.bucket = None
-        self._bucket_lock = threading.Lock()
-        self.oss_url_prefix = FD_OSS_URL_PREFIX
-
-    def _get_bucket(self):
-        if self.bucket is not None:
-            return self.bucket
-
-        with self._bucket_lock:
-            if self.bucket is not None:
-                return self.bucket
-
-            missing = [
-                name
-                for name, value in {
-                    "FD_OSS_ACCESS_KEY_ID": FD_OSS_ACCESS_KEY_ID,
-                    "FD_OSS_ACCESS_KEY_SECRET": FD_OSS_ACCESS_KEY_SECRET,
-                    "FD_OSS_BUCKET_NAME": FD_OSS_BUCKET_NAME,
-                    "FD_OSS_ENDPOINT": FD_OSS_ENDPOINT,
-                    "FD_OSS_URL_PREFIX": FD_OSS_URL_PREFIX,
-                }.items()
-                if not value
-            ]
-            if missing:
-                raise RuntimeError(f"未配置 OSS 上传参数: {', '.join(missing)}")
-
-            auth = oss2.Auth(FD_OSS_ACCESS_KEY_ID, FD_OSS_ACCESS_KEY_SECRET)
-            self.bucket = oss2.Bucket(
-                auth=auth,
-                bucket_name=FD_OSS_BUCKET_NAME,
-                endpoint=FD_OSS_ENDPOINT,
-                connect_timeout=30,
-            )
-            self.oss_url_prefix = FD_OSS_URL_PREFIX
-            return self.bucket
+        pass
 
     def _expand_images(self, images):
         if images is None:
@@ -143,8 +103,7 @@ class ZhiYiRemoveBgByMeituNode:
     def _upload_image(self, image_tensor):
         image_bytes = self._tensor_to_png_bytes(image_tensor)
         file_oss_path = f"{FD_OSS_URL_PATH_PREFIX_REMOVE_BG}/{bytes_calculate_hex_md5(image_bytes)}.png"
-        self._get_bucket().put_object(file_oss_path, image_bytes)
-        image_url = f"{self.oss_url_prefix}{file_oss_path}"
+        image_url = upload_bytes_to_oss(file_oss_path, image_bytes)
         print(f"[知衣美图服装抠图] upload {file_oss_path}")
         return image_url
 

@@ -1,13 +1,13 @@
 import base64
 import traceback
 from io import BytesIO
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import requests
 
 from ..config import FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL
 from ..old_gemini_api_node import GenImageServiceError
-from .error_utils import ERROR_TIMEOUT, classify_error_message, normalize_error_message
+from .error_utils import ERROR_TIMEOUT, normalize_error_message
 from .webhook import webhook_send
 
 
@@ -31,7 +31,6 @@ def summarize_gpt_image_result(result: dict) -> dict:
 
 class GptImageRequestMixin:
     PRIMARY_MODEL_MAX_ATTEMPTS = 3
-    AZURE_FALLBACK_MODEL = "gpt-image-2-azure"
 
     def _build_gpt_image_form_data(
         self,
@@ -163,31 +162,6 @@ class GptImageRequestMixin:
             logger=logger,
         )
 
-    def _request_azure_gpt_image_generation(
-        self,
-        *,
-        base_url: str,
-        api_key: str,
-        data: Dict[str, Any],
-        multipart_files: list[tuple[str, tuple[str, bytes, str]]],
-        batch_size: int,
-        logger,
-    ) -> tuple[BytesIO, str, str]:
-        form_data = self._build_gpt_image_form_data(
-            model=self.AZURE_FALLBACK_MODEL,
-            data=data,
-            include_n=True,
-        )
-        return self._post_gpt_image_request(
-            base_url=base_url,
-            api_key=api_key,
-            form_data=form_data,
-            multipart_files=multipart_files,
-            batch_size=batch_size,
-            log_label="GPT Azure fallback",
-            logger=logger,
-        )
-
     def _call_gpt_image_with_retry_policy(
         self,
         *,
@@ -199,7 +173,7 @@ class GptImageRequestMixin:
         logger,
     ) -> tuple[BytesIO, str, str]:
         primary_model = data["model"]
-        last_non_timeout_error: Optional[Exception] = None
+        last_error = None
 
         for attempt in range(1, self.PRIMARY_MODEL_MAX_ATTEMPTS + 1):
             logger.info(
@@ -219,51 +193,17 @@ class GptImageRequestMixin:
                     logger=logger,
                 )
             except GenImageServiceError as exc:
-                if classify_error_message(exc) == ERROR_TIMEOUT:
-                    logger.warning(
-                        "GPT Image API timed out for model=%s on attempt=%s/%s, falling back to model=%s",
-                        primary_model,
-                        attempt,
-                        self.PRIMARY_MODEL_MAX_ATTEMPTS,
-                        self.AZURE_FALLBACK_MODEL,
-                    )
-                    break
-
-                last_non_timeout_error = exc
+                last_error = exc
                 logger.warning(
-                    "GPT Image API failed for model=%s on attempt=%s/%s with non-timeout error: %s",
+                    "GPT Image API failed for model=%s on attempt=%s/%s: %s",
                     primary_model,
                     attempt,
                     self.PRIMARY_MODEL_MAX_ATTEMPTS,
                     exc,
                 )
-        else:
-            logger.warning(
-                "GPT Image API exhausted retries for model=%s, falling back to model=%s",
-                primary_model,
-                self.AZURE_FALLBACK_MODEL,
-            )
 
-        logger.info(
-            "Calling GPT Image API fallback with model=%s image_count=%s",
-            self.AZURE_FALLBACK_MODEL,
-            batch_size,
+        if last_error is not None:
+            raise last_error
+        raise GenImageServiceError(
+            normalize_error_message("GPT Image API 请求失败: 未返回结果")
         )
-        try:
-            return self._request_azure_gpt_image_generation(
-                base_url=base_url,
-                api_key=api_key,
-                data=data,
-                multipart_files=multipart_files,
-                batch_size=batch_size,
-                logger=logger,
-            )
-        except GenImageServiceError as fallback_exc:
-            if last_non_timeout_error is not None:
-                logger.error(
-                    "GPT Image API fallback model=%s also failed after primary error=%s: fallback_error=%s",
-                    self.AZURE_FALLBACK_MODEL,
-                    last_non_timeout_error,
-                    fallback_exc,
-                )
-            raise

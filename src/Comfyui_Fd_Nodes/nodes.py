@@ -10,7 +10,6 @@ from typing import Any, Dict, Optional, Tuple
 from uuid import uuid4
 
 import numpy as np
-import oss2
 import requests
 import torch
 from comfy.comfy_types.node_typing import IO, ComfyNodeABC, InputTypeDict
@@ -23,13 +22,8 @@ from .config import (
     FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL,
     FD_LITELLM_API_KEY,
     FD_LITELLM_BASE_URL,
-    FD_OSS_ACCESS_KEY_ID,
-    FD_OSS_ACCESS_KEY_SECRET,
-    FD_OSS_BUCKET_NAME,
-    FD_OSS_ENDPOINT,
     FD_OSS_URL_PATH_PREFIX_BEFORE_GEN,
     FD_OSS_URL_PATH_PREFIX_FLUX,
-    FD_OSS_URL_PREFIX,
     FD_Z_IMAGE_TURBO_PASSWORD,
     FD_Z_IMAGE_TURBO_URL,
     FD_Z_IMAGE_TURBO_USERNAME,
@@ -41,6 +35,7 @@ from .utils.common_util import (
     bytesio_to_image_tensor,
     downscale_image_tensor,
 )
+from .utils.oss_client import upload_bytes_to_oss
 from .utils.webhook import webhook_send
 from .gpt_image_node import FD_GTPImage
 from .gpt_image_combo_node import FD_GPTImageComboNode
@@ -237,14 +232,7 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
     Node to generate text and image responses from a Flux2KleinGen model.
     """
     def __init__(self):
-        auth = oss2.Auth(FD_OSS_ACCESS_KEY_ID, FD_OSS_ACCESS_KEY_SECRET)
-        self.bucket = oss2.Bucket(
-            auth=auth,
-            bucket_name=FD_OSS_BUCKET_NAME,
-            endpoint=FD_OSS_ENDPOINT,
-            connect_timeout=30
-        )
-        self.oss_url_prefix = FD_OSS_URL_PREFIX
+        pass
 
     @classmethod
     def INPUT_TYPES(cls) -> InputTypeDict:
@@ -354,9 +342,8 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
                 img.save(img_byte_arr, format="PNG")
                 img_byte_arr = img_byte_arr.getvalue()
                 file_oss_path = f"{FD_OSS_URL_PATH_PREFIX_FLUX}/{bytes_calculate_hex_md5(img_byte_arr)}.png"
-                self.bucket.put_object(file_oss_path, img_byte_arr)
+                oss_file_url = upload_bytes_to_oss(file_oss_path, img_byte_arr)
                 print(f"upload {file_oss_path}")
-                oss_file_url = f"{self.oss_url_prefix}{file_oss_path}"
                 image_url_list.append(oss_file_url)
             body['images'] = image_url_list
 
@@ -403,14 +390,7 @@ class FD_ZImageTurboGenImage(ComfyNodeABC):
     """
 
     def __init__(self):
-        auth = oss2.Auth(FD_OSS_ACCESS_KEY_ID, FD_OSS_ACCESS_KEY_SECRET)
-        self.bucket = oss2.Bucket(
-            auth=auth,
-            bucket_name=FD_OSS_BUCKET_NAME,
-            endpoint=FD_OSS_ENDPOINT,
-            connect_timeout=30,
-        )
-        self.oss_url_prefix = FD_OSS_URL_PREFIX
+        pass
 
     @classmethod
     def INPUT_TYPES(cls) -> InputTypeDict:
@@ -555,9 +535,8 @@ class FD_ZImageTurboGenImage(ComfyNodeABC):
                 img.save(img_byte_arr, format="PNG")
                 img_byte_arr = img_byte_arr.getvalue()
                 file_oss_path = f"{FD_OSS_URL_PATH_PREFIX_FLUX}/{bytes_calculate_hex_md5(img_byte_arr)}.png"
-                self.bucket.put_object(file_oss_path, img_byte_arr)
+                oss_file_url = upload_bytes_to_oss(file_oss_path, img_byte_arr)
                 print(f"upload {file_oss_path}")
-                oss_file_url = f"{self.oss_url_prefix}{file_oss_path}"
                 image_url_list.append(oss_file_url)
             body["images"] = image_url_list
 
@@ -608,14 +587,7 @@ class FD_SeedreamImage(ComfyNodeABC):
     Node to generate images using Seedream 5.0 Lite model.
     """
     def __init__(self):
-        auth = oss2.Auth(FD_OSS_ACCESS_KEY_ID, FD_OSS_ACCESS_KEY_SECRET)
-        self.bucket = oss2.Bucket(
-            auth=auth,
-            bucket_name=FD_OSS_BUCKET_NAME,
-            endpoint=FD_OSS_ENDPOINT,
-            connect_timeout=30
-        )
-        self.oss_url_prefix = FD_OSS_URL_PREFIX
+        pass
 
     @classmethod
     def INPUT_TYPES(cls) -> InputTypeDict:
@@ -707,9 +679,8 @@ class FD_SeedreamImage(ComfyNodeABC):
                 img.save(img_byte_arr, format="PNG")
                 img_byte_arr = img_byte_arr.getvalue()
                 file_oss_path = f"{FD_OSS_URL_PATH_PREFIX_BEFORE_GEN}/{bytes_calculate_hex_md5(img_byte_arr)}.png"
-                self.bucket.put_object(file_oss_path, img_byte_arr)
+                oss_file_url = upload_bytes_to_oss(file_oss_path, img_byte_arr)
                 print(f"upload {file_oss_path}")
-                oss_file_url = f"{self.oss_url_prefix}{file_oss_path}"
                 image_url_list.append(oss_file_url)
             body['image'] = image_url_list
 

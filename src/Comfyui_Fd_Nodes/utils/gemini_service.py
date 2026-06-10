@@ -1,24 +1,19 @@
 import hashlib
 import logging
 from io import BytesIO
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
-import oss2
 import requests
 import torch
 from PIL import Image
 
 from ..config import (
     FD_GEMINI_URL,
-    FD_OSS_ACCESS_KEY_ID,
-    FD_OSS_ACCESS_KEY_SECRET,
-    FD_OSS_BUCKET_NAME,
-    FD_OSS_ENDPOINT,
     FD_OSS_URL_PATH_PREFIX_GEMINI,
-    FD_OSS_URL_PREFIX,
 )
 from .error_utils import ERROR_TIMEOUT, normalize_error_message
+from .oss_client import upload_bytes_to_oss
 
 logger = logging.getLogger(__name__)
 
@@ -76,40 +71,10 @@ class GeminiImageServiceClient:
     def __init__(
         self,
         service_url: Optional[str] = None,
-        bucket=None,
-        oss_url_prefix: Optional[str] = None,
+        oss_uploader: Optional[Callable[[str, bytes], str]] = None,
     ):
         self.service_url = service_url or FD_GEMINI_URL
-        self.bucket = bucket
-        self.oss_url_prefix = oss_url_prefix or FD_OSS_URL_PREFIX
-
-    def _get_bucket(self):
-        if self.bucket is not None:
-            return self.bucket
-
-        missing = [
-            name
-            for name, value in {
-                "FD_OSS_ACCESS_KEY_ID": FD_OSS_ACCESS_KEY_ID,
-                "FD_OSS_ACCESS_KEY_SECRET": FD_OSS_ACCESS_KEY_SECRET,
-                "FD_OSS_BUCKET_NAME": FD_OSS_BUCKET_NAME,
-                "FD_OSS_ENDPOINT": FD_OSS_ENDPOINT,
-                "FD_OSS_URL_PREFIX": FD_OSS_URL_PREFIX,
-            }.items()
-            if not value
-        ]
-        if missing:
-            raise RuntimeError(f"未配置 OSS 上传参数: {', '.join(missing)}")
-
-        auth = oss2.Auth(FD_OSS_ACCESS_KEY_ID, FD_OSS_ACCESS_KEY_SECRET)
-        self.bucket = oss2.Bucket(
-            auth=auth,
-            bucket_name=FD_OSS_BUCKET_NAME,
-            endpoint=FD_OSS_ENDPOINT,
-            connect_timeout=30,
-        )
-        self.oss_url_prefix = FD_OSS_URL_PREFIX
-        return self.bucket
+        self.oss_uploader = oss_uploader or upload_bytes_to_oss
 
     def _tensor_to_png_bytes(self, image_tensor) -> bytes:
         if getattr(image_tensor, "ndim", None) == 4:
@@ -128,9 +93,9 @@ class GeminiImageServiceClient:
     def upload_image(self, image_tensor) -> str:
         image_bytes = self._tensor_to_png_bytes(image_tensor)
         file_oss_path = f"{FD_OSS_URL_PATH_PREFIX_GEMINI}/{bytes_calculate_hex_md5(image_bytes)}.png"
-        self._get_bucket().put_object(file_oss_path, image_bytes)
+        image_url = self.oss_uploader(file_oss_path, image_bytes)
         print(f"upload {file_oss_path}")
-        return f"{self.oss_url_prefix}{file_oss_path}"
+        return image_url
 
     def upload_images(self, image_tensors) -> list[str]:
         urls = []

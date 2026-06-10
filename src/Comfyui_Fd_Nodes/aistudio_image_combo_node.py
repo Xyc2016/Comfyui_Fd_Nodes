@@ -8,22 +8,17 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 
 import numpy as np
-import oss2
 import requests
 import torch
 from PIL import Image
 
 from .config import (
     FD_AISTUDIO_PUBLISH_URL,
-    FD_OSS_ACCESS_KEY_ID,
-    FD_OSS_ACCESS_KEY_SECRET,
-    FD_OSS_BUCKET_NAME,
-    FD_OSS_ENDPOINT,
     FD_OSS_URL_PATH_PREFIX_BEFORE_GEN,
-    FD_OSS_URL_PREFIX,
 )
 from .utils.error_utils import ERROR_TIMEOUT, normalize_error_message
 from .utils.logging_utils import configure_default_logging
+from .utils.oss_client import upload_bytes_to_oss
 
 configure_default_logging()
 logger = logging.getLogger(__name__)
@@ -51,8 +46,7 @@ class ZhiYiAiStudioImageComboNode:
     SEED_MODES = ["随机种子", "固定种子"]
 
     def __init__(self):
-        self.bucket = None
-        self.oss_url_prefix = FD_OSS_URL_PREFIX
+        pass
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -109,34 +103,6 @@ class ZhiYiAiStudioImageComboNode:
     CATEGORY = "知衣/图生图"
     OUTPUT_NODE = False
 
-    def _get_bucket(self):
-        if self.bucket is not None:
-            return self.bucket
-
-        missing = [
-            name
-            for name, value in {
-                "FD_OSS_ACCESS_KEY_ID": FD_OSS_ACCESS_KEY_ID,
-                "FD_OSS_ACCESS_KEY_SECRET": FD_OSS_ACCESS_KEY_SECRET,
-                "FD_OSS_BUCKET_NAME": FD_OSS_BUCKET_NAME,
-                "FD_OSS_ENDPOINT": FD_OSS_ENDPOINT,
-                "FD_OSS_URL_PREFIX": FD_OSS_URL_PREFIX,
-            }.items()
-            if not value
-        ]
-        if missing:
-            raise RuntimeError(f"未配置 OSS 上传参数: {', '.join(missing)}")
-
-        auth = oss2.Auth(FD_OSS_ACCESS_KEY_ID, FD_OSS_ACCESS_KEY_SECRET)
-        self.bucket = oss2.Bucket(
-            auth=auth,
-            bucket_name=FD_OSS_BUCKET_NAME,
-            endpoint=FD_OSS_ENDPOINT,
-            connect_timeout=30,
-        )
-        self.oss_url_prefix = FD_OSS_URL_PREFIX
-        return self.bucket
-
     def _tensor_to_png_bytes(self, image_tensor):
         if image_tensor.ndim == 4:
             image_tensor = image_tensor[0]
@@ -163,9 +129,9 @@ class ZhiYiAiStudioImageComboNode:
     def _upload_image(self, image_tensor):
         image_bytes = self._tensor_to_png_bytes(image_tensor)
         file_oss_path = f"{FD_OSS_URL_PATH_PREFIX_BEFORE_GEN}/{_bytes_calculate_hex_md5(image_bytes)}.png"
-        self._get_bucket().put_object(file_oss_path, image_bytes)
+        image_url = upload_bytes_to_oss(file_oss_path, image_bytes)
         print(f"upload {file_oss_path}")
-        return f"{self.oss_url_prefix}{file_oss_path}"
+        return image_url
 
     def _upload_images(self, image_tensors):
         urls = []

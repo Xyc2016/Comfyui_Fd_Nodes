@@ -6,7 +6,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 
 import numpy as np
-import oss2
 import requests
 from PIL import Image
 
@@ -14,16 +13,12 @@ from .config import (
     FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL,
     FD_LITELLM_API_KEY,
     FD_LITELLM_BASE_URL,
-    FD_OSS_ACCESS_KEY_ID,
-    FD_OSS_ACCESS_KEY_SECRET,
-    FD_OSS_BUCKET_NAME,
-    FD_OSS_ENDPOINT,
     FD_OSS_URL_PATH_PREFIX_BEFORE_GEN,
-    FD_OSS_URL_PREFIX,
 )
 from .utils.common_util import bytes_calculate_hex_md5, bytesio_to_image_tensor
 from .utils.error_utils import ERROR_TIMEOUT, normalize_error_message
 from .utils.logging_utils import configure_default_logging
+from .utils.oss_client import upload_bytes_to_oss
 from .utils.webhook import webhook_send
 
 configure_default_logging()
@@ -39,8 +34,7 @@ class FD_SeedreamImageComboNode:
     SEED_MODES = ["随机种子", "固定种子"]
 
     def __init__(self):
-        self.bucket = None
-        self.oss_url_prefix = FD_OSS_URL_PREFIX
+        pass
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -93,34 +87,6 @@ class FD_SeedreamImageComboNode:
     CATEGORY = "image/generation"
     OUTPUT_NODE = False
 
-    def _get_bucket(self):
-        if self.bucket is not None:
-            return self.bucket
-
-        missing = [
-            name
-            for name, value in {
-                "FD_OSS_ACCESS_KEY_ID": FD_OSS_ACCESS_KEY_ID,
-                "FD_OSS_ACCESS_KEY_SECRET": FD_OSS_ACCESS_KEY_SECRET,
-                "FD_OSS_BUCKET_NAME": FD_OSS_BUCKET_NAME,
-                "FD_OSS_ENDPOINT": FD_OSS_ENDPOINT,
-                "FD_OSS_URL_PREFIX": FD_OSS_URL_PREFIX,
-            }.items()
-            if not value
-        ]
-        if missing:
-            raise RuntimeError(f"未配置 OSS 上传参数: {', '.join(missing)}")
-
-        auth = oss2.Auth(FD_OSS_ACCESS_KEY_ID, FD_OSS_ACCESS_KEY_SECRET)
-        self.bucket = oss2.Bucket(
-            auth=auth,
-            bucket_name=FD_OSS_BUCKET_NAME,
-            endpoint=FD_OSS_ENDPOINT,
-            connect_timeout=30,
-        )
-        self.oss_url_prefix = FD_OSS_URL_PREFIX
-        return self.bucket
-
     def _tensor_to_png_bytes(self, image_tensor):
         if image_tensor.ndim == 4:
             image_tensor = image_tensor[0]
@@ -147,9 +113,9 @@ class FD_SeedreamImageComboNode:
     def _upload_image(self, image_tensor):
         image_bytes = self._tensor_to_png_bytes(image_tensor)
         file_oss_path = f"{FD_OSS_URL_PATH_PREFIX_BEFORE_GEN}/{bytes_calculate_hex_md5(image_bytes)}.png"
-        self._get_bucket().put_object(file_oss_path, image_bytes)
+        image_url = upload_bytes_to_oss(file_oss_path, image_bytes)
         print(f"upload {file_oss_path}")
-        return f"{self.oss_url_prefix}{file_oss_path}"
+        return image_url
 
     def _upload_images(self, image_tensors):
         urls = []

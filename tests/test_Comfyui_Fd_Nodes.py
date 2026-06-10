@@ -125,6 +125,7 @@ def test_zhiyi_image_to_image_nodes_expose_legacy_and_channel_models():
         "google/gemini-3-pro-image-preview-official",
         "google/gemini-3.1-flash-image-preview",
         "batch/gemini-3-pro-image-preview",
+        "gemini-3.1-flash-image-preview",
         "gemini-3-pro-image-preview-aistudio",
         "gemini-3-pro-image-preview-siphonlab",
     }
@@ -137,7 +138,7 @@ def test_zhiyi_image_to_image_nodes_expose_legacy_and_channel_models():
 
 
 def test_gemini_service_builds_internal_request_body():
-    client = GeminiImageServiceClient(service_url="https://gemini.internal", oss_url_prefix="https://oss/")
+    client = GeminiImageServiceClient(service_url="https://gemini.internal")
 
     body = client.build_request_body(
         prompt="draw product",
@@ -183,6 +184,7 @@ def test_gemini_service_model_and_prompt_helpers():
     assert should_use_litellm_gemini("gemini-3-pro-image-preview-aistudio") is False
     assert should_use_litellm_gemini("batch/gemini-3-pro-image-preview") is False
     assert should_use_litellm_gemini("gemini-3-pro-image-preview-siphonlab") is True
+    assert should_use_litellm_gemini("gemini-3.1-flash-image-preview") is False
     assert should_use_litellm_gemini("gemini-3-pro-image-preview") is False
     assert compose_prompt("user prompt", "system prompt") == "system prompt\n\nuser prompt"
     assert compose_prompt("user prompt", "") == "user prompt"
@@ -265,6 +267,45 @@ def test_zhiyi_image_to_image_aistudio_uses_internal_official_model(monkeypatch)
     assert request["prompt"] == "system prompt\n\nuser prompt"
     assert request["model"] == "gemini-3-pro-image-preview-aistudio"
     assert normalize_gemini_model_name(request["model"]) == "google/gemini-3-pro-image-preview-official"
+
+
+def test_zhiyi_image_to_image_flash_uses_internal_image_server(monkeypatch):
+    node = ZhiYiImageToImageNode()
+    calls = []
+
+    class FakeClient:
+        def upload_images(self, image_tensors):
+            calls.append(("upload_images", len(image_tensors)))
+            return ["https://oss/input.png"]
+
+        def call_with_image_urls(self, **kwargs):
+            calls.append(("call", kwargs))
+            return torch.ones((1, 2, 2, 3), dtype=torch.float32), "https://oss/result.png", "ok"
+
+    node.gemini_client = FakeClient()
+    monkeypatch.setattr(node, "_single_litellm_request", lambda *args: pytest.fail("flash image server model should not use LiteLLM directly"))
+
+    result, actual_seed = node.generate(
+        image_1=torch.zeros((1, 2, 2, 3), dtype=torch.float32),
+        prompt="user prompt",
+        model="gemini-3.1-flash-image-preview",
+        aspect_ratio="1:1",
+        image_size="4K",
+        batch_size=1,
+        seed_mode="固定种子",
+        seed=42,
+        out_request_id="req-123",
+        system_prompt="system prompt",
+    )
+
+    assert result.shape == (1, 2, 2, 3)
+    assert actual_seed == 42
+    assert calls[0] == ("upload_images", 1)
+    request = calls[1][1]
+    assert request["image_url_list"] == ["https://oss/input.png"]
+    assert request["prompt"] == "system prompt\n\nuser prompt"
+    assert request["model"] == "gemini-3.1-flash-image-preview"
+    assert normalize_gemini_model_name(request["model"]) == "google/gemini-3.1-flash-image-preview"
 
 
 def test_normalize_error_message_classifies_timeout_and_nsfw():
@@ -433,7 +474,13 @@ def test_zhiyi_image_to_image_combo_aistudio_uses_internal_official_model(monkey
     assert normalize_gemini_model_name(request_args[2]) == "google/gemini-3-pro-image-preview-official"
 
 
-def test_zhiyi_image_to_image_combo_siphonlab_uses_litellm_without_model_rename(monkeypatch):
+@pytest.mark.parametrize(
+    "model",
+    [
+        "gemini-3-pro-image-preview-siphonlab",
+    ],
+)
+def test_zhiyi_image_to_image_combo_siphonlab_uses_litellm_without_model_rename(monkeypatch, model):
     node = ZhiYiImageToImageComboNode()
     combo = {
         "images": [torch.zeros((1, 2, 2, 3), dtype=torch.float32)],
@@ -451,7 +498,7 @@ def test_zhiyi_image_to_image_combo_siphonlab_uses_litellm_without_model_rename(
     monkeypatch.setattr(node, "_single_litellm_request", fake_litellm)
 
     images, actual_seed, log_text = node.generate(
-        model="gemini-3-pro-image-preview-siphonlab",
+        model=model,
         aspect_ratio="1:1",
         image_size="4K",
         batch_size=1,
@@ -466,7 +513,7 @@ def test_zhiyi_image_to_image_combo_siphonlab_uses_litellm_without_model_rename(
     assert len(images) == 1
     assert actual_seed == 7
     assert "FD_LITELLM_BASE_URL/v1/chat/completions" in log_text
-    assert calls[0][1] == "gemini-3-pro-image-preview-siphonlab"
+    assert calls[0][1] == model
     assert calls[0][0][0]["role"] == "system"
     assert calls[0][0][1]["content"][0]["text"] == "prompt one"
     assert calls[0][0][1]["content"][1]["image_url"]["url"] == "data:image/png;base64,AAA"

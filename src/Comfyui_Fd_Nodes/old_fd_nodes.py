@@ -1,33 +1,21 @@
 import json
 import time
 
-import oss2
 import requests
 
 from .utils.common_util import bytes_calculate_hex_md5, pil2iobyte, tensor2pil
 from .config import (
     FD_DOUBAO_KEY,
     FD_DOUBAO_URL,
-    FD_OSS_ACCESS_KEY_ID,
-    FD_OSS_ACCESS_KEY_SECRET,
-    FD_OSS_BUCKET_NAME,
-    FD_OSS_ENDPOINT,
     FD_OSS_URL_PATH_PREFIX,
-    FD_OSS_URL_PREFIX,
 )
+from .utils.oss_client import upload_bytes_to_oss
 
 
 class FD_Upload:
     # 文件上传节点
     def __init__(self):
-        auth = oss2.Auth(FD_OSS_ACCESS_KEY_ID, FD_OSS_ACCESS_KEY_SECRET)
-        self.bucket = oss2.Bucket(
-            auth=auth,
-            bucket_name=FD_OSS_BUCKET_NAME,
-            endpoint=FD_OSS_ENDPOINT,
-            connect_timeout=30
-        )
-        self.oss_url_prefix = FD_OSS_URL_PREFIX
+        pass
 
     @classmethod
     def INPUT_TYPES(s):
@@ -50,9 +38,9 @@ class FD_Upload:
             return ("",)
         try:
             file_oss_path = f"{FD_OSS_URL_PATH_PREFIX}/{bytes_calculate_hex_md5(file)}"
-            self.bucket.put_object(file_oss_path, file)
+            file_url = upload_bytes_to_oss(file_oss_path, file)
             print(f"upload {file_oss_path}")
-            return (f"{self.oss_url_prefix}{file_oss_path}",)
+            return (file_url,)
         except Exception as e:
             print(e)
             print("上传错误请看上面提示错误")

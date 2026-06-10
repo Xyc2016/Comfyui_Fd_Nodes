@@ -6,7 +6,6 @@ from io import BytesIO
 from typing import Optional
 
 import numpy as np
-import oss2
 import requests
 from comfy.comfy_types.node_typing import IO, ComfyNodeABC, InputTypeDict
 from PIL import Image
@@ -15,12 +14,7 @@ from pydantic import BaseModel, Field
 from .config import (
     FD_GEMINI_URL,
     FD_GEMINI_WEBHOOK_URL,
-    FD_OSS_ACCESS_KEY_ID,
-    FD_OSS_ACCESS_KEY_SECRET,
-    FD_OSS_BUCKET_NAME,
-    FD_OSS_ENDPOINT,
     FD_OSS_URL_PATH_PREFIX_GEMINI,
-    FD_OSS_URL_PREFIX,
 )
 from .utils.common_util import (
     bytes_calculate_hex_md5,
@@ -29,6 +23,7 @@ from .utils.common_util import (
 )
 from .utils.error_utils import normalize_error_message
 from .utils.logging_utils import configure_default_logging
+from .utils.oss_client import upload_bytes_to_oss
 from .utils.webhook import webhook_send
 
 configure_default_logging()
@@ -102,14 +97,7 @@ class FD_GeminiImage(ComfyNodeABC):
     API communication and response parsing.
     """
     def __init__(self):
-        auth = oss2.Auth(FD_OSS_ACCESS_KEY_ID, FD_OSS_ACCESS_KEY_SECRET)
-        self.bucket = oss2.Bucket(
-            auth=auth,
-            bucket_name=FD_OSS_BUCKET_NAME,
-            endpoint=FD_OSS_ENDPOINT,
-            connect_timeout=30
-        )
-        self.oss_url_prefix = FD_OSS_URL_PREFIX
+        pass
 
     @classmethod
     def INPUT_TYPES(cls) -> InputTypeDict:
@@ -253,9 +241,8 @@ class FD_GeminiImage(ComfyNodeABC):
                 img.save(img_byte_arr, format="PNG")
                 img_byte_arr = img_byte_arr.getvalue()
                 file_oss_path = f"{FD_OSS_URL_PATH_PREFIX_GEMINI}/{bytes_calculate_hex_md5(img_byte_arr)}.png"
-                self.bucket.put_object(file_oss_path, img_byte_arr)
+                oss_file_url = upload_bytes_to_oss(file_oss_path, img_byte_arr)
                 print(f"upload {file_oss_path}")
-                oss_file_url = f"{self.oss_url_prefix}{file_oss_path}"
                 image_url_list.append(oss_file_url)
             body['image_url_list'] = image_url_list
 
