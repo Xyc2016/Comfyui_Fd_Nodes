@@ -63,6 +63,10 @@ def _derive_dwpose_preprocess_url(endpoint: str) -> str:
 
 FD_CONTROLNET_AUX_LINEART_URL = os.getenv("FD_CONTROLNET_AUX_LINEART_URL") or _derive_dwpose_preprocess_url("lineart")
 FD_CONTROLNET_AUX_DEPTH_ANYTHING_V2_URL = os.getenv("FD_CONTROLNET_AUX_DEPTH_ANYTHING_V2_URL") or _derive_dwpose_preprocess_url("depth-anything-v2")
+FD_RMBG_URL = os.getenv("FD_RMBG_URL", "http://10.1.0.230:8003/v1/rmbg")
+FD_CLOTHES_SEGMENT_URL = os.getenv("FD_CLOTHES_SEGMENT_URL", "http://10.1.0.230:8003/v1/segment/clothes")
+FD_FASHION_SEGMENT_URL = os.getenv("FD_FASHION_SEGMENT_URL", "http://10.1.0.230:8003/v1/segment/fashion")
+FD_BODY_SEGMENT_URL = os.getenv("FD_BODY_SEGMENT_URL", "http://10.1.0.230:8003/v1/segment/body")
 
 assert FD_LITELLM_BASE_URL, "FD_LITELLM_BASE_URL is not set"
 assert FD_LITELLM_API_KEY, "FD_LITELLM_API_KEY is not set"

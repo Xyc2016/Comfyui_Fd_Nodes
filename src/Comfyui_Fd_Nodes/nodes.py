@@ -52,6 +52,7 @@ from .zhiyi_image_combo_node import ZhiYiImageComboNode
 from .zhiyi_image_to_image_combo_node import ZhiYiImageToImageComboNode
 from .aistudio_image_combo_node import ZhiYiAiStudioImageComboNode
 from .remove_bg_by_meitu_node import ZhiYiRemoveBgByMeituNode
+from .zhiyi_rmbg_segment_node import ZhiYiBodySegmentNode, ZhiYiClothesSegmentNode, ZhiYiFashionSegmentNode, ZhiYiRMBGNode
 from .sam2_segment_node import ZhiYiSAM2SegmentNode
 from .zhiyi_controlnet_aux_node import ZhiYiDepthAnythingV2PreprocessorNode, ZhiYiLineArtPreprocessorNode
 from .zhiyi_dwpose_detect_node import ZhiYiDWPoseDetectNode
@@ -872,6 +873,10 @@ NODE_CLASS_MAPPINGS = {
     "ZhiYiImageToImageComboNode": ZhiYiImageToImageComboNode,
     "ZhiYiAiStudioImageComboNode": ZhiYiAiStudioImageComboNode,
     "ZhiYiRemoveBgByMeituNode": ZhiYiRemoveBgByMeituNode,
+    "ZhiYiRMBGNode": ZhiYiRMBGNode,
+    "ZhiYiClothesSegmentNode": ZhiYiClothesSegmentNode,
+    "ZhiYiFashionSegmentNode": ZhiYiFashionSegmentNode,
+    "ZhiYiBodySegmentNode": ZhiYiBodySegmentNode,
     "ZhiYiSAM2SegmentNode": ZhiYiSAM2SegmentNode,
     "ZhiYiDWPoseDetectNode": ZhiYiDWPoseDetectNode,
     "ZhiYiLineArtPreprocessorNode": ZhiYiLineArtPreprocessorNode,
@@ -904,6 +909,10 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ZhiYiImageToImageComboNode": "知衣-图生图-combo",
     "ZhiYiAiStudioImageComboNode": "知衣-AiStudio图生图-combo",
     "ZhiYiRemoveBgByMeituNode": "知衣-美图服装抠图",
+    "ZhiYiRMBGNode": "知衣-RMBG2.0背景去除",
+    "ZhiYiClothesSegmentNode": "知衣-衣物语义分割",
+    "ZhiYiFashionSegmentNode": "知衣-时尚单品分割",
+    "ZhiYiBodySegmentNode": "知衣-身体部位分割",
     "ZhiYiSAM2SegmentNode": "知衣-SAM2抠图",
     "ZhiYiDWPoseDetectNode": "知衣-DWPose姿态检测",
     "ZhiYiLineArtPreprocessorNode": "知衣-LineArt线稿预处理",
