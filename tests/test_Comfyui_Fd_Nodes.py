@@ -63,21 +63,21 @@ def test_fd_gtp_image_metadata_and_size_mapping():
     assert NODE_CLASS_MAPPINGS["FD_GTPImage"] is FD_GTPImage
     assert NODE_DISPLAY_NAME_MAPPINGS["FD_GTPImage"] == "FD GTP Image"
 
-    assert set(input_types["required"]) == {"out_request_id", "prompt", "model", "resolution", "seed"}
+    assert set(input_types["required"]) == {"out_request_id", "prompt", "model", "resolution", "quality", "seed"}
     assert set(input_types["optional"]) == {"images", "files", "aspect_ratio"}
     assert FD_GTPImage.RETURN_TYPES == ("IMAGE", "STRING", "STRING")
     assert FD_GTPImage.FUNCTION == "api_call"
     assert FD_GTPImage.CATEGORY == "image/generation"
 
-    assert _resolution_to_edit_size("1K", "") == "1024x1024"
-    assert _resolution_to_edit_size("1K", "3:4") == "768x1024"
-    assert _resolution_to_edit_size("1K", "9:16") == "720x1280"
-    assert _resolution_to_edit_size("2K", "") == "2048x2048"
-    assert _resolution_to_edit_size("2K", "3:4") == "1536x2048"
-    assert _resolution_to_edit_size("2K", "9:16") == "1152x2048"
-    assert _resolution_to_edit_size("4K", "") == "2880x2880"
-    assert _resolution_to_edit_size("4K", "1:1") == "2880x2880"
-    assert _resolution_to_edit_size("4K", "3:4") == "2160x2880"
+    assert _resolution_to_edit_size("1K", "") == "1K"
+    assert _resolution_to_edit_size("1K", "3:4") == "1K"
+    assert _resolution_to_edit_size("1K", "9:16") == "1K"
+    assert _resolution_to_edit_size("2K", "") == "2K"
+    assert _resolution_to_edit_size("2K", "3:4") == "2K"
+    assert _resolution_to_edit_size("2K", "9:16") == "2K"
+    assert _resolution_to_edit_size("4K", "") == "4K"
+    assert _resolution_to_edit_size("4K", "1:1") == "4K"
+    assert _resolution_to_edit_size("4K", "3:4") == "4K"
     assert _resolution_to_edit_size("4K", "9:16") == "2160x3840"
 
 
@@ -340,7 +340,6 @@ def test_gpt_multi_image_generate_returns_last_actual_error(monkeypatch):
     node = FD_GPTMultiImage()
     image = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
 
-    monkeypatch.setattr("src.Comfyui_Fd_Nodes.gpt_multi_image_node.load_config", lambda: {"base_url": "https://example.com", "api_key": "secret"})
     monkeypatch.setattr(
         node,
         "_run_concurrent",

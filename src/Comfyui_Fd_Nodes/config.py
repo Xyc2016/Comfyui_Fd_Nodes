@@ -11,6 +11,7 @@ FD_OSS_STS_KEY = os.getenv("FD_OSS_STS_KEY")
 FD_OSS_STS_TIMEOUT = os.getenv("FD_OSS_STS_TIMEOUT", "10")
 FD_OSS_URL_PATH_PREFIX = os.getenv("FD_OSS_URL_PATH_PREFIX", "devops/comfyui/text_img")
 FD_OSS_URL_PATH_PREFIX_GEMINI =  os.getenv("FD_OSS_URL_PATH_PREFIX_GEMINI", "devops/comfyui/segment_img")
+FD_OSS_URL_PATH_PREFIX_GPT_IMAGE = os.getenv("FD_OSS_URL_PATH_PREFIX_GPT_IMAGE", FD_OSS_URL_PATH_PREFIX_GEMINI)
 FD_GEMINI_URL = os.getenv("FD_GEMINI_URL")
 FD_DOUBAO_KEY = os.getenv("FD_DOUBAO_KEY")
 FD_DOUBAO_URL = os.getenv("FD_DOUBAO_URL")
@@ -26,6 +27,33 @@ FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL = os.getenv("FD_GEN_IMAGE_NOTIFICATION_WEB
 
 FD_LITELLM_BASE_URL = os.getenv("FD_LITELLM_BASE_URL")
 FD_LITELLM_API_KEY = os.getenv("FD_LITELLM_API_KEY")
+FD_GPT_IMAGE_BACKEND = os.getenv("FD_GPT_IMAGE_BACKEND", "image_generation")
+
+
+def _derive_gpt_image_edit_url() -> str:
+    source_url = (FD_GEMINI_URL or "").strip()
+    if not source_url:
+        return "http://image-generation.online-server-gray.svc.cluster.local/image/edit"
+    if "://" not in source_url:
+        source_url = f"http://{source_url}"
+
+    parsed = urlparse(source_url.rstrip("/"))
+    path = parsed.path.rstrip("/")
+    if not path:
+        path = "/image/edit"
+    elif path.endswith("/image/gemini_image"):
+        path = f"{path[:-len('/gemini_image')]}/edit"
+    elif path.endswith("/gemini_image"):
+        path = f"{path[:-len('/gemini_image')]}/image/edit"
+    elif path.endswith("/image"):
+        path = f"{path}/edit"
+    else:
+        path = f"{path}/image/edit"
+
+    return urlunparse((parsed.scheme, parsed.netloc, path, "", "", ""))
+
+
+FD_GPT_IMAGE_EDIT_URL = os.getenv("FD_GPT_IMAGE_EDIT_URL") or _derive_gpt_image_edit_url()
 
 FD_OSS_URL_PATH_PREFIX_BEFORE_GEN = os.getenv("FD_OSS_URL_PATH_PREFIX_BEFORE_GEN", "devops/comfyui/segment_img")
 FD_AISTUDIO_PUBLISH_URL = os.getenv("FD_AISTUDIO_PUBLISH_URL", "http://121.40.67.98:2003/api/tasks/publish")

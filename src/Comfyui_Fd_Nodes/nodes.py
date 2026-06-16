@@ -57,7 +57,7 @@ from .sam2_segment_node import ZhiYiSAM2SegmentNode
 from .zhiyi_controlnet_aux_node import ZhiYiDepthAnythingV2PreprocessorNode, ZhiYiLineArtPreprocessorNode
 from .zhiyi_dwpose_detect_node import ZhiYiDWPoseDetectNode
 from .zhiyi_qwen_detect_node import ZhiYiBBoxesToSAM2, ZhiYiQwenDetectNode
-from .utils.gpt_image_size import resolution_to_edit_size
+from .utils.gpt_image_size import resolution_to_image_generation_edit_size
 
 configure_default_logging()
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ FD_REMOVE_WATERMARK_SERVICE_URL = os.getenv("FD_REMOVE_WATERMARK_SERVICE_URL", "
 
 
 def _resolution_to_edit_size(resolution: str, aspect_ratio: str) -> str:
-    return resolution_to_edit_size(resolution, aspect_ratio)
+    return resolution_to_image_generation_edit_size(resolution, aspect_ratio)
 
 
 class FD_RemoveWatermark:

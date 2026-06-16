@@ -1,22 +1,13 @@
-import io
 import logging
 import random
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import numpy as np
-from PIL import Image
-
-from .config import (
-    FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL,
-    FD_LITELLM_API_KEY,
-    FD_LITELLM_BASE_URL,
-)
-from .config_manager import load_config
-from .utils.common_util import bytesio_to_image_tensor, downscale_image_tensor
+from .config import FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL
+from .utils.common_util import bytesio_to_image_tensor
 from .utils.error_utils import normalize_error_message
-from .utils.gpt_image_request import GptImageRequestMixin
-from .utils.gpt_image_size import resolution_to_edit_size
+from .utils.gpt_image_edit_client import get_default_gpt_image_edit_client
+from .utils.gpt_image_size import resolution_to_image_generation_edit_size
 from .utils.logging_utils import configure_default_logging
 from .utils.webhook import webhook_send
 
@@ -24,12 +15,13 @@ configure_default_logging()
 logger = logging.getLogger(__name__)
 
 
-class FD_GPTImageComboNode(GptImageRequestMixin):
+class FD_GPTImageComboNode:
     """GPT 图生图 combo 节点 - 接收最多8个图片组合并发调用 GPT Image API。"""
 
     MODELS = ["gpt-image-2"]
     ASPECT_RATIOS = ["", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9"]
     IMAGE_SIZES = ["4K", "2K", "1K"]
+    QUALITIES = ["low", "medium", "high"]
     SEED_MODES = ["随机种子", "固定种子"]
 
     @classmethod
@@ -39,6 +31,7 @@ class FD_GPTImageComboNode(GptImageRequestMixin):
                 "model": (cls.MODELS, {"default": cls.MODELS[0]}),
                 "aspect_ratio": (cls.ASPECT_RATIOS, {"default": ""}),
                 "image_size": (cls.IMAGE_SIZES, {"default": "4K"}),
+                "quality": (cls.QUALITIES, {"default": "medium"}),
                 "batch_size": ("INT", {
                     "default": 1,
                     "min": 1,
@@ -94,15 +87,7 @@ class FD_GPTImageComboNode(GptImageRequestMixin):
             return f"{system_text}\n\n{prompt_text}"
         return system_text or prompt_text
 
-    def _tensor_to_png_bytes(self, image_tensor):
-        arr = (image_tensor.detach().cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
-        image = Image.fromarray(arr)
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
-        return buffer.getvalue()
-
     def _expand_images(self, combo_images):
-        """展开 combo 内的 batch tensor 为单帧图片列表。"""
         result = []
         for image in combo_images:
             if image is None:
@@ -117,24 +102,16 @@ class FD_GPTImageComboNode(GptImageRequestMixin):
         return result
 
     def _build_gpt_size(self, aspect_ratio, image_size):
-        resolution = {
-            "720P": "1K",
-            "1080P": "1K",
-            "1K": "1K",
-            "2K": "2K",
-            "4K": "4K",
-        }.get(image_size, "2K")
-        return resolution_to_edit_size(resolution, aspect_ratio or "")
+        resolution = {"720P": "1K", "1080P": "1K", "1K": "1K", "2K": "2K", "4K": "4K"}.get(image_size, "2K")
+        return resolution_to_image_generation_edit_size(resolution, aspect_ratio or "")
 
     def _single_request(
         self,
-        base_url,
-        api_key,
-        model,
         prompt,
         images,
         aspect_ratio,
         image_size,
+        quality,
         out_request_id="",
     ):
         if not prompt or not prompt.strip():
@@ -143,52 +120,36 @@ class FD_GPTImageComboNode(GptImageRequestMixin):
             raise RuntimeError("未提供图片")
 
         size = self._build_gpt_size(aspect_ratio, image_size)
-        data = {
-            "model": model,
-            "prompt": prompt.strip(),
-            "size": size,
-            "quality": "medium",
-        }
-        if out_request_id:
-            data["user"] = out_request_id
-
-        multipart_files = []
-        for idx, image in enumerate(images):
-            scaled_image = downscale_image_tensor(image, total_pixels=4096 * 4096).squeeze(0)
-            logger.info(
-                "FD_GPTImageCombo Image %s resolution: input=%s scaled=%s",
-                idx,
-                tuple(image.squeeze(0).shape),
-                tuple(scaled_image.shape),
-            )
-            img_bytes = self._tensor_to_png_bytes(scaled_image)
-            multipart_files.append(
-                ("image", (f"image_{idx}.png", img_bytes, "image/png"))
-            )
 
         if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
             try:
                 webhook_send(FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL, {
                     "gtp_image_request": {
-                        "data": data,
-                        "image_count": len(multipart_files),
+                        "data": {
+                            "model": self.MODELS[0],
+                            "prompt": prompt.strip(),
+                            "size": size,
+                            "quality": quality,
+                        },
+                        "image_count": len(images),
                     }
                 })
             except Exception:
                 pass
 
         logger.info(
-            "Calling GPT image combo API with data=%s image_count=%s",
-            data,
-            len(multipart_files),
+            "Calling GPT image combo edit with size=%s quality=%s image_count=%s",
+            size,
+            quality,
+            len(images),
         )
-        image_bytesio, output_text, result_url = self._call_gpt_image_with_retry_policy(
-            base_url=base_url,
-            api_key=api_key,
-            data=data,
-            multipart_files=multipart_files,
-            batch_size=len(multipart_files),
-            logger=logger,
+        client = get_default_gpt_image_edit_client()
+        image_bytesio, output_text, result_url = client.edit_image(
+            image_tensors=images,
+            prompt=prompt.strip(),
+            size=size,
+            quality=quality,
+            out_request_id=out_request_id,
         )
         output_image = bytesio_to_image_tensor(image_bytesio)
         return output_image, output_text, result_url
@@ -223,19 +184,13 @@ class FD_GPTImageComboNode(GptImageRequestMixin):
                     traceback.print_exc()
         return results, log_lines, last_error_message
 
-    def generate(self, model, aspect_ratio, image_size,
+    def generate(self, model, aspect_ratio, image_size, quality="medium",
                  batch_size=1, max_concurrency=16, seed_mode="随机种子", seed=0,
                  out_request_id="",
                  combo_1=None, combo_2=None, combo_3=None, combo_4=None,
                  combo_5=None, combo_6=None, combo_7=None, combo_8=None,
                  system_prompt=""):
-        cfg = load_config()
-        final_base_url = (FD_LITELLM_BASE_URL or cfg["base_url"] or "").rstrip("/")
-        final_api_key = FD_LITELLM_API_KEY or cfg["api_key"]
-        if not final_base_url or final_base_url == "https://your-api-base-url":
-            raise RuntimeError("未配置 base_url，请在环境变量 FD_LITELLM_BASE_URL 中设置")
-        if not final_api_key or final_api_key == "your-api-key":
-            raise RuntimeError("未配置 api_key，请在环境变量 FD_LITELLM_API_KEY 中设置")
+        del model
 
         actual_seed = random.randint(0, 2147483647) if seed_mode == "随机种子" else seed
 
@@ -278,13 +233,11 @@ class FD_GPTImageComboNode(GptImageRequestMixin):
                             task_idx,
                             self._single_request,
                             (
-                                final_base_url,
-                                final_api_key,
-                                model,
                                 combined_prompt,
                                 request_images,
                                 aspect_ratio,
                                 image_size,
+                                quality,
                                 out_request_id,
                             ),
                         ))
@@ -306,7 +259,8 @@ class FD_GPTImageComboNode(GptImageRequestMixin):
         results, log_lines, last_error_message = self._run_concurrent(tasks, max_concurrency, label="请求")
 
         successful = [result for result in results if result is not None]
-        header = f"总计: {len(successful)}/{len(tasks)} 成功, url={final_base_url}/v1/images/edits"
+        from .config import FD_GPT_IMAGE_EDIT_URL
+        header = f"总计: {len(successful)}/{len(tasks)} 成功, url={FD_GPT_IMAGE_EDIT_URL}"
         if pre_errors:
             header += f"\n预处理失败 {len(pre_errors)} 个: " + "; ".join(pre_errors)
         log_lines.insert(0, header)

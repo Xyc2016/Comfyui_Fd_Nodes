@@ -46,3 +46,13 @@ def resolution_to_edit_size(resolution: str, aspect_ratio: str) -> str:
     }
     normalized_resolution = resolution if resolution in size_map else "2K"
     return size_map[normalized_resolution].get(aspect_ratio, size_map[normalized_resolution][""])
+
+
+def resolution_to_image_generation_edit_size(resolution: str, aspect_ratio: str = "") -> str:
+    normalized_resolution = resolution if resolution in ("1K", "2K", "4K") else "2K"
+    if normalized_resolution == "4K":
+        if aspect_ratio in ("16:9", "21:9"):
+            return "3840x2160"
+        if aspect_ratio == "9:16":
+            return "2160x3840"
+    return normalized_resolution

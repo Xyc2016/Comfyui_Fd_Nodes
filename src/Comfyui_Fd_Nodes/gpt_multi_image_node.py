@@ -1,37 +1,28 @@
-import io
 import logging
 import random
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import numpy as np
 import torch
-from PIL import Image
 
-from .config import (
-    FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL,
-    FD_LITELLM_API_KEY,
-    FD_LITELLM_BASE_URL,
-)
-from .config_manager import load_config
 from .old_gemini_api_node import GenImageServiceError
-from .utils.common_util import bytesio_to_image_tensor, downscale_image_tensor
+from .utils.common_util import bytesio_to_image_tensor
 from .utils.error_utils import normalize_error_message
-from .utils.gpt_image_size import resolution_to_edit_size
-from .utils.gpt_image_request import GptImageRequestMixin
+from .utils.gpt_image_edit_client import get_default_gpt_image_edit_client
+from .utils.gpt_image_size import resolution_to_image_generation_edit_size
 from .utils.logging_utils import configure_default_logging
-from .utils.webhook import webhook_send
 
 configure_default_logging()
 logger = logging.getLogger(__name__)
 
 
-class FD_GPTMultiImage(GptImageRequestMixin):
-    """GPT 多图编辑节点，沿用知衣多图输入与并发方式，底层调用 GPT Image edits API。"""
+class FD_GPTMultiImage:
+    """GPT 多图编辑节点，沿用知衣多图输入与并发方式，底层调用 GPT Image edit API。"""
 
     MODELS = ["gpt-image-2"]
     ASPECT_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9"]
     IMAGE_SIZES = ["4K", "2K", "1K"]
+    QUALITIES = ["low", "medium", "high"]
     SEED_MODES = ["随机种子", "固定种子"]
 
     @classmethod
@@ -46,6 +37,7 @@ class FD_GPTMultiImage(GptImageRequestMixin):
                 "model": (cls.MODELS, {"default": cls.MODELS[0]}),
                 "aspect_ratio": (cls.ASPECT_RATIOS, {"default": "1:1"}),
                 "image_size": (cls.IMAGE_SIZES, {"default": "4K"}),
+                "quality": (cls.QUALITIES, {"default": "medium"}),
                 "batch_size": ("INT", {
                     "default": 1,
                     "min": 1,
@@ -98,21 +90,9 @@ class FD_GPTMultiImage(GptImageRequestMixin):
             return f"{system_text}\n\n{prompt_text}"
         return system_text or prompt_text
 
-    def _tensor_to_png_bytes(self, image_tensor):
-        image_np = (image_tensor.numpy() * 255).clip(0, 255).astype(np.uint8)
-        image = Image.fromarray(image_np)
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
-        return buffer.getvalue()
-
     def _build_gpt_size(self, aspect_ratio, image_size):
-        resolution = {
-            "720P": "1K",
-            "1080P": "1K",
-            "2K": "2K",
-            "4K": "4K",
-        }.get(image_size, "2K")
-        return resolution_to_edit_size(resolution, aspect_ratio)
+        resolution = {"720P": "1K", "1080P": "1K", "1K": "1K", "2K": "2K", "4K": "4K"}.get(image_size, "2K")
+        return resolution_to_image_generation_edit_size(resolution, aspect_ratio or "")
 
     def _run_concurrent(self, tasks, label="任务"):
         results = [None] * len(tasks)
@@ -140,63 +120,23 @@ class FD_GPTMultiImage(GptImageRequestMixin):
 
     def _single_request(
         self,
-        base_url,
-        api_key,
-        model,
         prompt,
         images,
         aspect_ratio,
         image_size,
+        quality,
         out_request_id="default",
     ):
         size = self._build_gpt_size(aspect_ratio, image_size)
-        data = {
-            "model": model,
-            "prompt": prompt,
-            "size": size,
-            "user": out_request_id,
-            "quality": "medium",
-        }
-
-        multipart_files = []
-        for idx, image in enumerate(images):
-            scaled_image = downscale_image_tensor(image, total_pixels=4096 * 4096).squeeze(0)
-            logger.info(
-                "FD_GTPMultiImage Image %s resolution: input=%s scaled=%s",
-                idx,
-                tuple(image.squeeze(0).shape),
-                tuple(scaled_image.shape),
-            )
-            img_bytes = self._tensor_to_png_bytes(scaled_image)
-            multipart_files.append(
-                ("image", (f"image_{idx}.png", img_bytes, "image/png"))
-            )
-
-        if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
-            try:
-                webhook_send(FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL, {
-                    "gtp_image_request": {
-                        "data": data,
-                        "image_count": len(multipart_files),
-                    }
-                })
-            except Exception:
-                pass
-
-        logger.info(
-            "Calling GPT multi-image API with data=%s image_count=%s",
-            data,
-            len(multipart_files),
-        )
 
         try:
-            image_bytesio, _, _ = self._call_gpt_image_with_retry_policy(
-                base_url=base_url,
-                api_key=api_key,
-                data=data,
-                multipart_files=multipart_files,
-                batch_size=len(multipart_files),
-                logger=logger,
+            client = get_default_gpt_image_edit_client()
+            image_bytesio, _, _ = client.edit_image(
+                image_tensors=images,
+                prompt=prompt,
+                size=size,
+                quality=quality,
+                out_request_id=out_request_id if out_request_id != "default" else "",
             )
             output_image = bytesio_to_image_tensor(image_bytesio)
         except Exception as exc:
@@ -216,6 +156,7 @@ class FD_GPTMultiImage(GptImageRequestMixin):
         model,
         aspect_ratio,
         image_size,
+        quality="medium",
         batch_size=1,
         seed_mode="随机种子",
         seed=0,
@@ -229,13 +170,10 @@ class FD_GPTMultiImage(GptImageRequestMixin):
         image_6=None,
         system_prompt="",
     ):
+        del model
         if node_switch == 1:
             empty = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
             return (empty, 0)
-
-        cfg = load_config()
-        base_url = (FD_LITELLM_BASE_URL or cfg["base_url"]).rstrip("/")
-        api_key = FD_LITELLM_API_KEY or cfg["api_key"]
 
         actual_seed = random.randint(0, 2147483647) if seed_mode == "随机种子" else seed
         input_images = [
@@ -276,13 +214,11 @@ class FD_GPTMultiImage(GptImageRequestMixin):
                         task_idx,
                         self._single_request,
                         (
-                            base_url,
-                            api_key,
-                            model,
                             combined_prompt,
                             request_images,
                             aspect_ratio,
                             image_size,
+                            quality,
                             out_request_id,
                         ),
                     )

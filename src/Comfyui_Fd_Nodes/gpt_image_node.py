@@ -1,20 +1,12 @@
 import logging
-from io import BytesIO
 from typing import Optional
 
-import numpy as np
-import torch
 from comfy.comfy_types.node_typing import IO, ComfyNodeABC, InputTypeDict
-from PIL import Image
 
-from .config import (
-    FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL,
-    FD_LITELLM_API_KEY,
-    FD_LITELLM_BASE_URL,
-)
-from .utils.common_util import bytesio_to_image_tensor, downscale_image_tensor
-from .utils.gpt_image_size import resolution_to_edit_size
-from .utils.gpt_image_request import GptImageRequestMixin
+from .config import FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL
+from .utils.common_util import bytesio_to_image_tensor
+from .utils.gpt_image_edit_client import get_default_gpt_image_edit_client
+from .utils.gpt_image_size import resolution_to_image_generation_edit_size
 from .utils.logging_utils import configure_default_logging
 from .utils.webhook import webhook_send
 
@@ -23,18 +15,10 @@ logger = logging.getLogger(__name__)
 
 
 def _resolution_to_edit_size(resolution: str, aspect_ratio: str) -> str:
-    return resolution_to_edit_size(resolution, aspect_ratio)
+    return resolution_to_image_generation_edit_size(resolution, aspect_ratio)
 
 
-def _image_tensor_to_png_bytes(image: torch.Tensor) -> bytes:
-    image_np = (image.numpy() * 255).astype(np.uint8)
-    img = Image.fromarray(image_np)
-    img_byte_arr = BytesIO()
-    img.save(img_byte_arr, format="PNG")
-    return img_byte_arr.getvalue()
-
-
-class FD_GTPImage(GptImageRequestMixin, ComfyNodeABC):
+class FD_GTPImage(ComfyNodeABC):
     """
     Node to edit images using GPT Image API.
     """
@@ -72,6 +56,14 @@ class FD_GTPImage(GptImageRequestMixin, ComfyNodeABC):
                         "tooltip": "Output size preset for the image edit request.",
                         "options": ["1K", "2K", "4K"],
                         "default": "2K",
+                    },
+                ),
+                "quality": (
+                    IO.COMBO,
+                    {
+                        "default": "medium",
+                        "options": ["low", "medium", "high"],
+                        "tooltip": "输出图片质量，透传给 image-generation /image/edit",
                     },
                 ),
                 "seed": (
@@ -128,6 +120,7 @@ class FD_GTPImage(GptImageRequestMixin, ComfyNodeABC):
         prompt: str,
         model: str,
         resolution: Optional[str] = None,
+        quality: str = "medium",
         images: Optional[IO.IMAGE] = None,
         aspect_ratio: str = "",
         files=None,
@@ -143,51 +136,40 @@ class FD_GTPImage(GptImageRequestMixin, ComfyNodeABC):
             raise ValueError("FD_GTPImage requires a non-empty prompt.")
 
         size = _resolution_to_edit_size(resolution or "2K", aspect_ratio)
-        data = {
-            "model": model,
-            "prompt": prompt.strip(),
-            "size": size,
-            "user": out_request_id,
-            "quality": "medium",
-        }
-
-        multipart_files = []
-        batch_size = images.shape[0]
-        for i in range(batch_size):
-            single_image = images[i : i + 1]
-            scaled_image = downscale_image_tensor(single_image, total_pixels=4096 * 4096).squeeze()
-            logger.info(
-                "FD_GTPImage Image %s resolution: input=%s scaled=%s",
-                i,
-                tuple(single_image.squeeze().shape),
-                tuple(scaled_image.shape),
-            )
-            img_bytes = _image_tensor_to_png_bytes(scaled_image)
-            multipart_files.append(
-                ("image", (f"image_{i}.png", img_bytes, "image/png"))
-            )
+        request_images = [images[i : i + 1] for i in range(images.shape[0])]
 
         if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
             try:
                 print("Sending gtp_image webhook message...")
                 webhook_send(FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL, {
                     "gtp_image_request": {
-                        "data": data,
-                        "image_count": batch_size,
+                        "data": {
+                            "model": model,
+                            "prompt": prompt.strip(),
+                            "size": size,
+                            "quality": quality,
+                        },
+                        "image_count": len(request_images),
                     }
                 })
             except Exception:
                 pass
 
-        logger.info("Calling GPT Image API with data=%s image_count=%s", data, batch_size)
+        logger.info(
+            "Calling GPT Image edit with model=%s size=%s quality=%s image_count=%s",
+            model,
+            size,
+            quality,
+            len(request_images),
+        )
 
-        image_bytesio, output_text, result_url = self._call_gpt_image_with_retry_policy(
-            base_url=FD_LITELLM_BASE_URL,
-            api_key=FD_LITELLM_API_KEY,
-            data=data,
-            multipart_files=multipart_files,
-            batch_size=batch_size,
-            logger=logger,
+        client = get_default_gpt_image_edit_client()
+        image_bytesio, output_text, result_url = client.edit_image(
+            image_tensors=request_images,
+            prompt=prompt.strip(),
+            size=size,
+            quality=quality,
+            out_request_id=out_request_id if out_request_id != "default" else "",
         )
         output_image = bytesio_to_image_tensor(image_bytesio)
         return (output_image, output_text, result_url)
