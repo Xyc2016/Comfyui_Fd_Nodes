@@ -138,6 +138,7 @@ class FD_GPTMultiImage:
                 image_tensors=images,
                 prompt=prompt,
                 size=size,
+                aspect_ratio=aspect_ratio or "",
                 quality=quality,
                 out_request_id=out_request_id if out_request_id != "default" else "",
             )

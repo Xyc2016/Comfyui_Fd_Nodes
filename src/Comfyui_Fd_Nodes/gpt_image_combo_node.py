@@ -151,6 +151,7 @@ class FD_GPTImageComboNode:
             image_tensors=images,
             prompt=prompt.strip(),
             size=size,
+            aspect_ratio=aspect_ratio or "",
             quality=quality,
             out_request_id=out_request_id,
         )

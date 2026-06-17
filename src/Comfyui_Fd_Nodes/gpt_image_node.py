@@ -168,6 +168,7 @@ class FD_GTPImage(ComfyNodeABC):
             image_tensors=request_images,
             prompt=prompt.strip(),
             size=size,
+            aspect_ratio=aspect_ratio or "",
             quality=quality,
             out_request_id=out_request_id if out_request_id != "default" else "",
         )

@@ -49,6 +49,8 @@ def test_image_generation_edit_uploads_posts_and_downloads(monkeypatch):
             "image_url_list": ["https://oss.example.com/input.png"],
             "prompt": "make white background",
             "size": "4K",
+            "aspect_ratio": "9:16",
+            "ratio": "9:16",
             "quality": "high",
         }
         return DummyResponse(data={
@@ -76,6 +78,7 @@ def test_image_generation_edit_uploads_posts_and_downloads(monkeypatch):
         image_tensors=[torch.zeros((1, 2, 2, 3), dtype=torch.float32)],
         prompt="make white background",
         size="4K",
+        aspect_ratio="9:16",
         quality="high",
         out_request_id="req-1",
     )

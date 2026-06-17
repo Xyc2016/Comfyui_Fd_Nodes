@@ -51,6 +51,7 @@ class GptImageEditClient:
         image_tensors,
         prompt: str,
         size: str,
+        aspect_ratio: str = "",
         quality: str = "medium",
         out_request_id: str = "",
     ) -> Tuple[BytesIO, str, str]:
@@ -60,6 +61,7 @@ class GptImageEditClient:
                 image_tensors=image_tensors,
                 prompt=prompt,
                 size=size,
+                aspect_ratio=aspect_ratio,
                 quality=quality,
                 out_request_id=out_request_id,
             )
@@ -67,6 +69,7 @@ class GptImageEditClient:
             image_tensors=image_tensors,
             prompt=prompt,
             size=size,
+            aspect_ratio=aspect_ratio,
             quality=quality,
             out_request_id=out_request_id,
         )
@@ -77,6 +80,7 @@ class GptImageEditClient:
         image_tensors,
         prompt: str,
         size: str,
+        aspect_ratio: str,
         quality: str,
         out_request_id: str,
     ) -> Tuple[BytesIO, str, str]:
@@ -89,13 +93,16 @@ class GptImageEditClient:
             "size": size,
             "quality": quality,
         }
+        if aspect_ratio:
+            body["aspect_ratio"] = aspect_ratio
+            body["ratio"] = aspect_ratio
         headers = {"Content-Type": "application/json"}
         if out_request_id:
             headers["x-request-id"] = out_request_id
 
         logger.info(
-            "Calling image-generation /image/edit channel=%s size=%s quality=%s image_count=%s url=%s",
-            self.GPT_IMAGE_CHANNEL, size, quality, len(image_urls), self.edit_url,
+            "Calling image-generation /image/edit channel=%s size=%s aspect_ratio=%s quality=%s image_count=%s url=%s",
+            self.GPT_IMAGE_CHANNEL, size, aspect_ratio or "", quality, len(image_urls), self.edit_url,
         )
         try:
             response = self._request_post(
@@ -188,6 +195,7 @@ class GptImageEditClient:
         image_tensors,
         prompt: str,
         size: str,
+        aspect_ratio: str,
         quality: str,
         out_request_id: str,
     ) -> Tuple[BytesIO, str, str]:
