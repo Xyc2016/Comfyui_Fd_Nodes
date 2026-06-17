@@ -2,6 +2,7 @@
 
 """Tests for `Comfyui_Fd_Nodes` package."""
 
+import io
 import json
 import logging
 
@@ -65,7 +66,7 @@ def test_fd_gtp_image_metadata_and_size_mapping():
     assert NODE_DISPLAY_NAME_MAPPINGS["FD_GTPImage"] == "FD GTP Image"
 
     assert list(input_types["required"]) == ["out_request_id", "prompt", "model", "resolution", "seed"]
-    assert list(input_types["optional"]) == ["images", "files", "aspect_ratio", "quality"]
+    assert list(input_types["optional"]) == ["images", "files", "aspect_ratio", "quality", "resize"]
     assert FD_GTPImage.RETURN_TYPES == ("IMAGE", "STRING", "STRING")
     assert FD_GTPImage.FUNCTION == "api_call"
     assert FD_GTPImage.CATEGORY == "image/generation"
@@ -109,7 +110,7 @@ def test_gpt_nodes_keep_legacy_widget_order():
         "resolution",
         "seed",
     ]
-    assert list(single_inputs["optional"]) == ["images", "files", "aspect_ratio", "quality"]
+    assert list(single_inputs["optional"]) == ["images", "files", "aspect_ratio", "quality", "resize"]
 
     assert list(combo_inputs["required"]) == [
         "model",
@@ -120,7 +121,7 @@ def test_gpt_nodes_keep_legacy_widget_order():
         "seed_mode",
         "seed",
     ]
-    assert list(combo_inputs["optional"])[-1] == "quality"
+    assert list(combo_inputs["optional"])[-2:] == ["quality", "resize"]
 
     assert list(multi_inputs["required"]) == [
         "image_1",
@@ -132,7 +133,117 @@ def test_gpt_nodes_keep_legacy_widget_order():
         "seed_mode",
         "seed",
     ]
-    assert list(multi_inputs["optional"])[-1] == "quality"
+    assert list(multi_inputs["optional"])[-2:] == ["quality", "resize"]
+
+
+def test_fd_gtp_image_passes_resize_to_client(monkeypatch):
+    node = FD_GTPImage()
+    captured = {}
+
+    class FakeClient:
+        def edit_image(self, **kwargs):
+            captured.update(kwargs)
+            return io.BytesIO(b"fake-image"), "ok", "https://example.com/result.png"
+
+    monkeypatch.setattr(
+        "src.Comfyui_Fd_Nodes.gpt_image_node.get_default_gpt_image_edit_client",
+        lambda: FakeClient(),
+    )
+    monkeypatch.setattr(
+        "src.Comfyui_Fd_Nodes.gpt_image_node.bytesio_to_image_tensor",
+        lambda _image_bytesio: torch.ones((1, 2, 2, 3), dtype=torch.float32),
+    )
+
+    image, output_text, result_url = node.api_call(
+        out_request_id="req-resize",
+        prompt="edit image",
+        model="gpt-image-2",
+        resolution="2K",
+        quality="high",
+        resize=False,
+        images=torch.zeros((1, 2, 2, 3), dtype=torch.float32),
+        aspect_ratio="3:4",
+    )
+
+    assert tuple(image.shape) == (1, 2, 2, 3)
+    assert output_text == "ok"
+    assert result_url == "https://example.com/result.png"
+    assert captured["resize"] is False
+    assert captured["aspect_ratio"] == "3:4"
+    assert captured["quality"] == "high"
+    assert captured["out_request_id"] == "req-resize"
+
+
+def test_gpt_combo_single_request_passes_resize_to_client(monkeypatch):
+    node = FD_GPTImageComboNode()
+    captured = {}
+
+    class FakeClient:
+        def edit_image(self, **kwargs):
+            captured.update(kwargs)
+            return io.BytesIO(b"fake-image"), "ok", "https://example.com/result.png"
+
+    monkeypatch.setattr(
+        "src.Comfyui_Fd_Nodes.gpt_image_combo_node.get_default_gpt_image_edit_client",
+        lambda: FakeClient(),
+    )
+    monkeypatch.setattr(
+        "src.Comfyui_Fd_Nodes.gpt_image_combo_node.bytesio_to_image_tensor",
+        lambda _image_bytesio: torch.ones((1, 2, 2, 3), dtype=torch.float32),
+    )
+
+    image, output_text, result_url = node._single_request(
+        "edit image",
+        [torch.zeros((1, 2, 2, 3), dtype=torch.float32)],
+        "3:4",
+        "2K",
+        "high",
+        False,
+        "req-resize",
+    )
+
+    assert tuple(image.shape) == (1, 2, 2, 3)
+    assert output_text == "ok"
+    assert result_url == "https://example.com/result.png"
+    assert captured["resize"] is False
+    assert captured["aspect_ratio"] == "3:4"
+    assert captured["quality"] == "high"
+    assert captured["out_request_id"] == "req-resize"
+
+
+def test_gpt_multi_single_request_passes_resize_to_client(monkeypatch):
+    node = FD_GPTMultiImage()
+    captured = {}
+
+    class FakeClient:
+        def edit_image(self, **kwargs):
+            captured.update(kwargs)
+            return io.BytesIO(b"fake-image"), "ok", "https://example.com/result.png"
+
+    monkeypatch.setattr(
+        "src.Comfyui_Fd_Nodes.gpt_multi_image_node.get_default_gpt_image_edit_client",
+        lambda: FakeClient(),
+    )
+    monkeypatch.setattr(
+        "src.Comfyui_Fd_Nodes.gpt_multi_image_node.bytesio_to_image_tensor",
+        lambda _image_bytesio: torch.ones((1, 2, 2, 3), dtype=torch.float32),
+    )
+
+    image = node._single_request(
+        "edit image",
+        [torch.zeros((1, 2, 2, 3), dtype=torch.float32)],
+        "3:4",
+        "2K",
+        "high",
+        False,
+        "req-resize",
+    )
+
+    assert tuple(image.shape) == (1, 2, 2, 3)
+    assert captured["resize"] is False
+    assert captured["aspect_ratio"] == "3:4"
+    assert captured["quality"] == "high"
+    assert captured["out_request_id"] == "req-resize"
 
 
 def test_new_nodes_hide_base_url_and_api_key_inputs():

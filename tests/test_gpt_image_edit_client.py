@@ -52,6 +52,7 @@ def test_image_generation_edit_uploads_posts_and_downloads(monkeypatch):
             "aspect_ratio": "9:16",
             "ratio": "9:16",
             "quality": "high",
+            "resize": False,
         }
         return DummyResponse(data={
             "status": True,
@@ -80,6 +81,7 @@ def test_image_generation_edit_uploads_posts_and_downloads(monkeypatch):
         size="4K",
         aspect_ratio="9:16",
         quality="high",
+        resize=False,
         out_request_id="req-1",
     )
 
@@ -87,6 +89,32 @@ def test_image_generation_edit_uploads_posts_and_downloads(monkeypatch):
     assert output_text == "make white background"
     assert result_url == "https://oss.example.com/result.png"
     assert [call[0] for call in calls] == ["upload", "post", "get"]
+
+
+def test_image_generation_edit_sends_resize_true_by_default():
+    captured = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured.update(json)
+        return DummyResponse(data={
+            "status": True,
+            "result_image_url": "https://oss.example.com/result.png",
+        })
+
+    client = GptImageEditClient(
+        edit_url="https://image-generation.example.com/image/edit",
+        oss_uploader=lambda path, data: "https://oss.example.com/input.png",
+        request_post=fake_post,
+        request_get=lambda url, timeout: DummyResponse(content=_png_bytes()),
+    )
+
+    client.edit_image(
+        image_tensors=[torch.zeros((1, 2, 2, 3), dtype=torch.float32)],
+        prompt="edit",
+        size="2K",
+    )
+
+    assert captured["resize"] is True
 
 
 def test_image_generation_edit_raises_error_message_on_status_false():
@@ -106,3 +134,27 @@ def test_image_generation_edit_raises_error_message_on_status_false():
             size="2K",
             quality="low",
         )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (False, False),
+        (0, False),
+        ("false", False),
+        ("False", False),
+        ("0", False),
+        ("no", False),
+        ("off", False),
+        (True, True),
+        (1, True),
+        ("true", True),
+        ("yes", True),
+        ("", True),
+        (None, True),
+    ],
+)
+def test_normalize_resize_accepts_falseish_values(value, expected):
+    client = GptImageEditClient()
+
+    assert client._normalize_resize(value) is expected

@@ -73,6 +73,10 @@ class FD_GPTImageComboNode:
                     "default": "medium",
                     "tooltip": "输出图片质量，默认 medium。追加到 optional 末尾以兼容旧 workflow 的 widget 顺序。",
                 }),
+                "resize": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "是否让 image-generation 对 gpt-image-2 结果做后置 resize。关闭时直接返回上游原图。",
+                }),
             },
         }
 
@@ -115,6 +119,7 @@ class FD_GPTImageComboNode:
         aspect_ratio,
         image_size,
         quality,
+        resize,
         out_request_id="",
     ):
         if not prompt or not prompt.strip():
@@ -153,6 +158,7 @@ class FD_GPTImageComboNode:
             size=size,
             aspect_ratio=aspect_ratio or "",
             quality=quality,
+            resize=resize,
             out_request_id=out_request_id,
         )
         output_image = bytesio_to_image_tensor(image_bytesio)
@@ -188,7 +194,7 @@ class FD_GPTImageComboNode:
                     traceback.print_exc()
         return results, log_lines, last_error_message
 
-    def generate(self, model, aspect_ratio, image_size, quality="medium",
+    def generate(self, model, aspect_ratio, image_size, quality="medium", resize=True,
                  batch_size=1, max_concurrency=16, seed_mode="随机种子", seed=0,
                  out_request_id="",
                  combo_1=None, combo_2=None, combo_3=None, combo_4=None,
@@ -242,6 +248,7 @@ class FD_GPTImageComboNode:
                                 aspect_ratio,
                                 image_size,
                                 quality,
+                                resize,
                                 out_request_id,
                             ),
                         ))

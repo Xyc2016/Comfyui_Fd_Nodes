@@ -77,6 +77,10 @@ class FD_GPTMultiImage:
                     "default": "medium",
                     "tooltip": "输出图片质量，默认 medium。追加到 optional 末尾以兼容旧 workflow 的 widget 顺序。",
                 }),
+                "resize": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "是否让 image-generation 对 gpt-image-2 结果做后置 resize。关闭时直接返回上游原图。",
+                }),
             },
         }
 
@@ -128,6 +132,7 @@ class FD_GPTMultiImage:
         aspect_ratio,
         image_size,
         quality,
+        resize,
         out_request_id="default",
     ):
         size = self._build_gpt_size(aspect_ratio, image_size)
@@ -140,6 +145,7 @@ class FD_GPTMultiImage:
                 size=size,
                 aspect_ratio=aspect_ratio or "",
                 quality=quality,
+                resize=resize,
                 out_request_id=out_request_id if out_request_id != "default" else "",
             )
             output_image = bytesio_to_image_tensor(image_bytesio)
@@ -161,6 +167,7 @@ class FD_GPTMultiImage:
         aspect_ratio,
         image_size,
         quality="medium",
+        resize=True,
         batch_size=1,
         seed_mode="随机种子",
         seed=0,
@@ -223,6 +230,7 @@ class FD_GPTMultiImage:
                             aspect_ratio,
                             image_size,
                             quality,
+                            resize,
                             out_request_id,
                         ),
                     )

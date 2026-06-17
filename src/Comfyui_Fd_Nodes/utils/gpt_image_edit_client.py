@@ -53,6 +53,7 @@ class GptImageEditClient:
         size: str,
         aspect_ratio: str = "",
         quality: str = "medium",
+        resize=True,
         out_request_id: str = "",
     ) -> Tuple[BytesIO, str, str]:
         """根据 backend 选择调用方式，返回 (image_bytesio, output_text, result_url)。"""
@@ -63,6 +64,7 @@ class GptImageEditClient:
                 size=size,
                 aspect_ratio=aspect_ratio,
                 quality=quality,
+                resize=resize,
                 out_request_id=out_request_id,
             )
         return self._edit_via_image_generation(
@@ -71,6 +73,7 @@ class GptImageEditClient:
             size=size,
             aspect_ratio=aspect_ratio,
             quality=quality,
+            resize=resize,
             out_request_id=out_request_id,
         )
 
@@ -82,9 +85,11 @@ class GptImageEditClient:
         size: str,
         aspect_ratio: str,
         quality: str,
+        resize,
         out_request_id: str,
     ) -> Tuple[BytesIO, str, str]:
         image_urls = self._upload_images(image_tensors)
+        normalized_resize = self._normalize_resize(resize)
 
         body = {
             "channel": self.GPT_IMAGE_CHANNEL,
@@ -92,6 +97,7 @@ class GptImageEditClient:
             "prompt": prompt,
             "size": size,
             "quality": quality,
+            "resize": normalized_resize,
         }
         if aspect_ratio:
             body["aspect_ratio"] = aspect_ratio
@@ -101,8 +107,8 @@ class GptImageEditClient:
             headers["x-request-id"] = out_request_id
 
         logger.info(
-            "Calling image-generation /image/edit channel=%s size=%s aspect_ratio=%s quality=%s image_count=%s url=%s",
-            self.GPT_IMAGE_CHANNEL, size, aspect_ratio or "", quality, len(image_urls), self.edit_url,
+            "Calling image-generation /image/edit channel=%s size=%s aspect_ratio=%s quality=%s resize=%s image_count=%s url=%s",
+            self.GPT_IMAGE_CHANNEL, size, aspect_ratio or "", quality, normalized_resize, len(image_urls), self.edit_url,
         )
         try:
             response = self._request_post(
@@ -189,6 +195,16 @@ class GptImageEditClient:
         image.save(buffer, format="PNG")
         return buffer.getvalue()
 
+    def _normalize_resize(self, resize) -> bool:
+        if resize is None:
+            return True
+        if isinstance(resize, str):
+            value = resize.strip().lower()
+            if not value:
+                return True
+            return value not in {"0", "false", "no", "off"}
+        return bool(resize)
+
     def _edit_via_litellm(
         self,
         *,
@@ -197,6 +213,7 @@ class GptImageEditClient:
         size: str,
         aspect_ratio: str,
         quality: str,
+        resize,
         out_request_id: str,
     ) -> Tuple[BytesIO, str, str]:
         mixin = _LiteLLMAdapter()

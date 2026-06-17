@@ -100,6 +100,13 @@ class FD_GTPImage(ComfyNodeABC):
                         "tooltip": "输出图片质量，默认 medium。追加到 optional 末尾以兼容旧 workflow 的 widget 顺序。",
                     },
                 ),
+                "resize": (
+                    IO.BOOLEAN,
+                    {
+                        "default": True,
+                        "tooltip": "是否让 image-generation 对 gpt-image-2 结果做后置 resize。关闭时直接返回上游原图。",
+                    },
+                ),
             },
             "hidden": {
                 "auth_token": "AUTH_TOKEN_COMFY_ORG",
@@ -121,6 +128,7 @@ class FD_GTPImage(ComfyNodeABC):
         model: str,
         resolution: Optional[str] = None,
         quality: str = "medium",
+        resize: bool = True,
         images: Optional[IO.IMAGE] = None,
         aspect_ratio: str = "",
         files=None,
@@ -170,6 +178,7 @@ class FD_GTPImage(ComfyNodeABC):
             size=size,
             aspect_ratio=aspect_ratio or "",
             quality=quality,
+            resize=resize,
             out_request_id=out_request_id if out_request_id != "default" else "",
         )
         output_image = bytesio_to_image_tensor(image_bytesio)
