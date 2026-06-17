@@ -8,6 +8,7 @@ import logging
 import pytest
 import torch
 from src.Comfyui_Fd_Nodes.gpt_image_edit_node import GPTImageEditNode
+from src.Comfyui_Fd_Nodes.gpt_image_combo_node import FD_GPTImageComboNode
 from src.Comfyui_Fd_Nodes.gpt_multi_image_node import FD_GPTMultiImage
 from src.Comfyui_Fd_Nodes.nodes import (
     FD_GTPImage,
@@ -63,8 +64,8 @@ def test_fd_gtp_image_metadata_and_size_mapping():
     assert NODE_CLASS_MAPPINGS["FD_GTPImage"] is FD_GTPImage
     assert NODE_DISPLAY_NAME_MAPPINGS["FD_GTPImage"] == "FD GTP Image"
 
-    assert set(input_types["required"]) == {"out_request_id", "prompt", "model", "resolution", "quality", "seed"}
-    assert set(input_types["optional"]) == {"images", "files", "aspect_ratio"}
+    assert list(input_types["required"]) == ["out_request_id", "prompt", "model", "resolution", "seed"]
+    assert list(input_types["optional"]) == ["images", "files", "aspect_ratio", "quality"]
     assert FD_GTPImage.RETURN_TYPES == ("IMAGE", "STRING", "STRING")
     assert FD_GTPImage.FUNCTION == "api_call"
     assert FD_GTPImage.CATEGORY == "image/generation"
@@ -93,6 +94,45 @@ def test_fd_gtp_image_requires_input_image():
             images=None,
             aspect_ratio="",
         )
+
+
+def test_gpt_nodes_keep_legacy_widget_order():
+    """New optional controls must not shift saved workflow widget values."""
+    single_inputs = FD_GTPImage.INPUT_TYPES()
+    combo_inputs = FD_GPTImageComboNode.INPUT_TYPES()
+    multi_inputs = FD_GPTMultiImage.INPUT_TYPES()
+
+    assert list(single_inputs["required"]) == [
+        "out_request_id",
+        "prompt",
+        "model",
+        "resolution",
+        "seed",
+    ]
+    assert list(single_inputs["optional"]) == ["images", "files", "aspect_ratio", "quality"]
+
+    assert list(combo_inputs["required"]) == [
+        "model",
+        "aspect_ratio",
+        "image_size",
+        "batch_size",
+        "max_concurrency",
+        "seed_mode",
+        "seed",
+    ]
+    assert list(combo_inputs["optional"])[-1] == "quality"
+
+    assert list(multi_inputs["required"]) == [
+        "image_1",
+        "prompt",
+        "model",
+        "aspect_ratio",
+        "image_size",
+        "batch_size",
+        "seed_mode",
+        "seed",
+    ]
+    assert list(multi_inputs["optional"])[-1] == "quality"
 
 
 def test_new_nodes_hide_base_url_and_api_key_inputs():

@@ -10,7 +10,17 @@ def test_aistudio_combo_node_metadata():
 
     assert input_types["required"]["model"][0] == "STRING"
     assert input_types["required"]["model"][1]["default"] == "nano-banana-pro"
-    assert input_types["required"]["quality"][0] == ["low", "medium", "high"]
+    assert list(input_types["required"]) == [
+        "model",
+        "aspect_ratio",
+        "image_size",
+        "batch_size",
+        "max_concurrency",
+        "seed_mode",
+        "seed",
+    ]
+    assert list(input_types["optional"])[-1] == "quality"
+    assert input_types["optional"]["quality"][0] == ["low", "medium", "high"]
     assert "combo_1" in input_types["optional"]
     assert ZhiYiAiStudioImageComboNode.RETURN_TYPES == ("IMAGE", "INT", "STRING")
     assert ZhiYiAiStudioImageComboNode.OUTPUT_IS_LIST == (True, False, False)

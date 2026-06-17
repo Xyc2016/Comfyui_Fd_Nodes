@@ -64,10 +64,6 @@ class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
                 }),
                 "aspect_ratio": (cls.ASPECT_RATIOS, {"default": ""}),
                 "image_size": (cls.IMAGE_SIZES, {"default": "4K"}),
-                "quality": (cls.QUALITIES, {
-                    "default": "medium",
-                    "tooltip": "GPT Image edits 质量参数；AiStudio publish 渠道会忽略该字段。",
-                }),
                 "batch_size": ("INT", {
                     "default": 1,
                     "min": 1,
@@ -105,6 +101,10 @@ class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
                 "system_prompt": ("STRING", {
                     "default": "",
                     "multiline": True,
+                }),
+                "quality": (cls.QUALITIES, {
+                    "default": "medium",
+                    "tooltip": "GPT Image edits 质量参数，默认 medium。追加到 optional 末尾以兼容旧 workflow 的 widget 顺序；AiStudio publish 渠道会忽略该字段。",
                 }),
             },
         }

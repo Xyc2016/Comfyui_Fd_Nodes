@@ -58,14 +58,6 @@ class FD_GTPImage(ComfyNodeABC):
                         "default": "2K",
                     },
                 ),
-                "quality": (
-                    IO.COMBO,
-                    {
-                        "default": "medium",
-                        "options": ["low", "medium", "high"],
-                        "tooltip": "输出图片质量，透传给 image-generation /image/edit",
-                    },
-                ),
                 "seed": (
                     IO.INT,
                     {
@@ -98,6 +90,14 @@ class FD_GTPImage(ComfyNodeABC):
                         "default": "",
                         "options": ["", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9"],
                         "tooltip": "Optional aspect ratio for the edited image.",
+                    },
+                ),
+                "quality": (
+                    IO.COMBO,
+                    {
+                        "default": "medium",
+                        "options": ["low", "medium", "high"],
+                        "tooltip": "输出图片质量，默认 medium。追加到 optional 末尾以兼容旧 workflow 的 widget 顺序。",
                     },
                 ),
             },

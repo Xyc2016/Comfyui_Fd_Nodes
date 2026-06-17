@@ -37,7 +37,6 @@ class FD_GPTMultiImage:
                 "model": (cls.MODELS, {"default": cls.MODELS[0]}),
                 "aspect_ratio": (cls.ASPECT_RATIOS, {"default": "1:1"}),
                 "image_size": (cls.IMAGE_SIZES, {"default": "4K"}),
-                "quality": (cls.QUALITIES, {"default": "medium"}),
                 "batch_size": ("INT", {
                     "default": 1,
                     "min": 1,
@@ -73,6 +72,10 @@ class FD_GPTMultiImage:
                 "system_prompt": ("STRING", {
                     "default": "",
                     "multiline": True,
+                }),
+                "quality": (cls.QUALITIES, {
+                    "default": "medium",
+                    "tooltip": "输出图片质量，默认 medium。追加到 optional 末尾以兼容旧 workflow 的 widget 顺序。",
                 }),
             },
         }
