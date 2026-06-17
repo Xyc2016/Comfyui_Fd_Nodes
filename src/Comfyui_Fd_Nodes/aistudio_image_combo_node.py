@@ -14,9 +14,14 @@ from PIL import Image
 
 from .config import (
     FD_AISTUDIO_PUBLISH_URL,
+    FD_LITELLM_API_KEY,
+    FD_LITELLM_BASE_URL,
     FD_OSS_URL_PATH_PREFIX_BEFORE_GEN,
 )
+from .utils.common_util import downscale_image_tensor
 from .utils.error_utils import ERROR_TIMEOUT, normalize_error_message
+from .utils.gpt_image_request import GptImageRequestMixin
+from .utils.gpt_image_size import resolution_to_edit_size
 from .utils.logging_utils import configure_default_logging
 from .utils.oss_client import upload_bytes_to_oss
 
@@ -37,12 +42,13 @@ def _bytesio_to_image_tensor(image_bytesio):
     return torch.from_numpy(image_array).unsqueeze(0)
 
 
-class ZhiYiAiStudioImageComboNode:
-    """知衣 AiStudio 图生图 combo 节点 - 使用 publish 测试渠道生成图片。"""
+class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
+    """知衣 AiStudio 图生图 combo 节点 - 支持 AiStudio publish 与 LiteLLM GPT Image edits。"""
 
     MODELS = ["nano-banana-pro"]
     ASPECT_RATIOS = ["", "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"]
     IMAGE_SIZES = ["4K", "2K", "1080P", "720P"]
+    QUALITIES = ["low", "medium", "high"]
     SEED_MODES = ["随机种子", "固定种子"]
 
     def __init__(self):
@@ -52,9 +58,16 @@ class ZhiYiAiStudioImageComboNode:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model": (cls.MODELS, {"default": cls.MODELS[0]}),
+                "model": ("STRING", {
+                    "default": cls.MODELS[0],
+                    "tooltip": "模型名称。填 gpt-image-2 / openai/gpt-image-2 等包含 gpt-image 的模型时走 LiteLLM GPT Image edits；其他模型保持 AiStudio publish 渠道。",
+                }),
                 "aspect_ratio": (cls.ASPECT_RATIOS, {"default": ""}),
                 "image_size": (cls.IMAGE_SIZES, {"default": "4K"}),
+                "quality": (cls.QUALITIES, {
+                    "default": "medium",
+                    "tooltip": "GPT Image edits 质量参数；AiStudio publish 渠道会忽略该字段。",
+                }),
                 "batch_size": ("INT", {
                     "default": 1,
                     "min": 1,
@@ -157,6 +170,30 @@ class ZhiYiAiStudioImageComboNode:
             return f"{size_text[:-1]}K"
         return size_text
 
+    def _normalize_model_name(self, model):
+        return str(model or "").strip() or self.MODELS[0]
+
+    def _should_use_gpt_litellm(self, model):
+        return "gpt-image" in self._normalize_model_name(model).lower()
+
+    def _build_gpt_size(self, aspect_ratio, image_size):
+        normalized_size = self._normalize_image_size(image_size)
+        if normalized_size == "720P":
+            resolution = "720P"
+        elif normalized_size == "1080P":
+            resolution = "1080P"
+        elif normalized_size in ("1K", "2K", "4K"):
+            resolution = normalized_size
+        else:
+            resolution = "2K"
+        return resolution_to_edit_size(resolution, aspect_ratio or "")
+
+    def _normalize_quality(self, quality):
+        normalized_quality = str(quality or "").strip().lower()
+        if normalized_quality in self.QUALITIES:
+            return normalized_quality
+        return "medium"
+
     def _build_payload(self, prompt, image_urls, aspect_ratio, image_size):
         payload = {
             "prompt": prompt,
@@ -205,6 +242,20 @@ class ZhiYiAiStudioImageComboNode:
         response.raise_for_status()
         return _bytesio_to_image_tensor(BytesIO(response.content))
 
+    def _build_gpt_multipart_files(self, images):
+        multipart_files = []
+        for idx, image in enumerate(images):
+            scaled_image = downscale_image_tensor(image, total_pixels=4096 * 4096).squeeze(0)
+            logger.info(
+                "ZhiYiAiStudio GPT Image %s resolution: input=%s scaled=%s",
+                idx,
+                tuple(image.squeeze(0).shape),
+                tuple(scaled_image.shape),
+            )
+            img_bytes = self._tensor_to_png_bytes(scaled_image)
+            multipart_files.append(("image", (f"image_{idx}.png", img_bytes, "image/png")))
+        return multipart_files
+
     def _single_request(self, publish_url, prompt, image_urls, aspect_ratio, image_size, model, seed, out_request_id=""):
         if not prompt or not prompt.strip():
             raise RuntimeError("prompt 不能为空")
@@ -252,6 +303,65 @@ class ZhiYiAiStudioImageComboNode:
         except Exception as exc:
             raise RuntimeError(normalize_error_message(exc)) from exc
 
+    def _single_gpt_request(
+        self,
+        base_url,
+        api_key,
+        model,
+        prompt,
+        images,
+        aspect_ratio,
+        image_size,
+        quality,
+        seed,
+        out_request_id="",
+    ):
+        if not prompt or not prompt.strip():
+            raise RuntimeError("prompt 不能为空")
+        if not images:
+            raise RuntimeError("未提供图片")
+
+        normalized_model = self._normalize_model_name(model)
+        size = self._build_gpt_size(aspect_ratio, image_size)
+        normalized_quality = self._normalize_quality(quality)
+        data = {
+            "model": normalized_model,
+            "prompt": prompt.strip(),
+            "size": size,
+            "quality": normalized_quality,
+        }
+        if out_request_id:
+            data["user"] = out_request_id
+
+        multipart_files = self._build_gpt_multipart_files(images)
+        log_payload = {
+            "model": normalized_model,
+            "prompt": prompt.strip(),
+            "size": size,
+            "quality": normalized_quality,
+            "image_count": len(multipart_files),
+            "seed": seed,
+            "out_request_id": out_request_id or None,
+        }
+        print(
+            "[知衣AiStudio图生图-combo] 调用 GPT Image API 参数: "
+            f"{json.dumps(log_payload, ensure_ascii=False)}"
+        )
+        logger.info("Calling ZhiYi AiStudio GPT Image API with payload=%s", log_payload)
+
+        try:
+            image_bytesio, _, result_url = self._call_gpt_image_with_retry_policy(
+                base_url=base_url,
+                api_key=api_key,
+                data=data,
+                multipart_files=multipart_files,
+                batch_size=len(multipart_files),
+                logger=logger,
+            )
+            return _bytesio_to_image_tensor(image_bytesio), None, result_url
+        except Exception as exc:
+            raise RuntimeError(normalize_error_message(exc)) from exc
+
     def _run_concurrent(self, tasks, max_workers, label="任务"):
         results = [None] * len(tasks)
         log_lines = []
@@ -282,14 +392,24 @@ class ZhiYiAiStudioImageComboNode:
                     traceback.print_exc()
         return results, log_lines, last_error_message
 
-    def generate(self, model, aspect_ratio, image_size,
+    def generate(self, model, aspect_ratio, image_size, quality="medium",
                  batch_size=1, max_concurrency=16, seed_mode="随机种子", seed=0,
                  out_request_id="",
                  combo_1=None, combo_2=None, combo_3=None, combo_4=None,
                  combo_5=None, combo_6=None, combo_7=None, combo_8=None,
                  system_prompt=""):
+        normalized_model = self._normalize_model_name(model)
+        use_gpt_litellm = self._should_use_gpt_litellm(normalized_model)
         publish_url = FD_AISTUDIO_PUBLISH_URL
-        if not publish_url:
+        litellm_base_url = (FD_LITELLM_BASE_URL or "").rstrip("/")
+        litellm_api_key = FD_LITELLM_API_KEY or ""
+
+        if use_gpt_litellm:
+            if not litellm_base_url:
+                raise RuntimeError("未配置 base_url，请在环境变量 FD_LITELLM_BASE_URL 中设置")
+            if not litellm_api_key:
+                raise RuntimeError("未配置 api_key，请在环境变量 FD_LITELLM_API_KEY 中设置")
+        elif not publish_url:
             raise RuntimeError("未配置 AiStudio publish URL，请设置环境变量 FD_AISTUDIO_PUBLISH_URL")
 
         actual_seed = random.randint(0, 2147483647) if seed_mode == "随机种子" else seed
@@ -314,7 +434,7 @@ class ZhiYiAiStudioImageComboNode:
                 if not expanded_images:
                     raise RuntimeError("无有效图片")
 
-                image_urls = self._upload_images(expanded_images)
+                image_urls = None if use_gpt_litellm else self._upload_images(expanded_images)
                 for p_idx, prompt in enumerate(combo_prompts):
                     combined_prompt = self._compose_prompt(prompt, system_prompt)
                     for b_idx in range(batch_size):
@@ -330,20 +450,38 @@ class ZhiYiAiStudioImageComboNode:
                             b_idx + 1,
                             task_seed,
                         )
-                        tasks.append((
-                            task_idx,
-                            self._single_request,
-                            (
-                                publish_url,
-                                combined_prompt,
-                                image_urls,
-                                aspect_ratio,
-                                image_size,
-                                model,
-                                task_seed,
-                                out_request_id,
-                            ),
-                        ))
+                        if use_gpt_litellm:
+                            tasks.append((
+                                task_idx,
+                                self._single_gpt_request,
+                                (
+                                    litellm_base_url,
+                                    litellm_api_key,
+                                    normalized_model,
+                                    combined_prompt,
+                                    expanded_images,
+                                    aspect_ratio,
+                                    image_size,
+                                    quality,
+                                    task_seed,
+                                    out_request_id,
+                                ),
+                            ))
+                        else:
+                            tasks.append((
+                                task_idx,
+                                self._single_request,
+                                (
+                                    publish_url,
+                                    combined_prompt,
+                                    image_urls,
+                                    aspect_ratio,
+                                    image_size,
+                                    normalized_model,
+                                    task_seed,
+                                    out_request_id,
+                                ),
+                            ))
                         task_idx += 1
             except Exception as exc:
                 normalized_error = normalize_error_message(exc)
@@ -362,7 +500,8 @@ class ZhiYiAiStudioImageComboNode:
         results, log_lines, last_error_message = self._run_concurrent(tasks, max_concurrency, label="请求")
 
         successful = [result for result in results if result is not None]
-        header = f"总计: {len(successful)}/{len(tasks)} 成功, url={publish_url}"
+        target_url = f"{litellm_base_url}/v1/images/edits" if use_gpt_litellm else publish_url
+        header = f"总计: {len(successful)}/{len(tasks)} 成功, url={target_url}"
         if pre_errors:
             header += f"\n预处理失败 {len(pre_errors)} 个: " + "; ".join(pre_errors)
         log_lines.insert(0, header)

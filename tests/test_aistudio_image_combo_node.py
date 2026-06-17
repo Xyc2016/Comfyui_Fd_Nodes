@@ -8,7 +8,9 @@ from src.Comfyui_Fd_Nodes.aistudio_image_combo_node import ZhiYiAiStudioImageCom
 def test_aistudio_combo_node_metadata():
     input_types = ZhiYiAiStudioImageComboNode.INPUT_TYPES()
 
-    assert input_types["required"]["model"][0] == ["nano-banana-pro"]
+    assert input_types["required"]["model"][0] == "STRING"
+    assert input_types["required"]["model"][1]["default"] == "nano-banana-pro"
+    assert input_types["required"]["quality"][0] == ["low", "medium", "high"]
     assert "combo_1" in input_types["optional"]
     assert ZhiYiAiStudioImageComboNode.RETURN_TYPES == ("IMAGE", "INT", "STRING")
     assert ZhiYiAiStudioImageComboNode.OUTPUT_IS_LIST == (True, False, False)
@@ -102,6 +104,7 @@ def test_aistudio_combo_generate_reuses_uploaded_urls_and_keeps_combo_shape(monk
         model="nano-banana-pro",
         aspect_ratio="",
         image_size="4K",
+        quality="medium",
         batch_size=1,
         max_concurrency=2,
         seed_mode="固定种子",
@@ -145,7 +148,102 @@ def test_aistudio_combo_generate_returns_last_actual_error(monkeypatch):
             model="nano-banana-pro",
             aspect_ratio="1:1",
             image_size="4K",
+            quality="medium",
             batch_size=1,
             max_concurrency=1,
             combo_1=combo,
         )
+
+
+def test_aistudio_combo_generate_routes_gpt_image_model_to_litellm_without_upload(monkeypatch):
+    node = ZhiYiAiStudioImageComboNode()
+    image = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
+    combo = {"images": [image], "prompts": ["test prompt"]}
+    captured_tasks = []
+
+    monkeypatch.setattr(
+        aistudio_image_combo_module,
+        "FD_LITELLM_BASE_URL",
+        "https://litellm.example.com",
+    )
+    monkeypatch.setattr(aistudio_image_combo_module, "FD_LITELLM_API_KEY", "secret")
+    monkeypatch.setattr(node, "_upload_images", lambda images: pytest.fail("GPT Image LiteLLM branch should not upload OSS URLs"))
+
+    def fake_run_concurrent(tasks, max_workers, label="任务"):
+        captured_tasks.extend(tasks)
+        return (["image-1"], ["[请求 1] 成功"], None)
+
+    monkeypatch.setattr(node, "_run_concurrent", fake_run_concurrent)
+
+    images, actual_seed, log_text = node.generate(
+        model="openai/gpt-image-2",
+        aspect_ratio="3:4",
+        image_size="2K",
+        quality="high",
+        batch_size=1,
+        max_concurrency=1,
+        seed_mode="固定种子",
+        seed=20,
+        out_request_id="req-gpt",
+        combo_1=combo,
+        system_prompt="system",
+    )
+
+    assert images == ["image-1"]
+    assert actual_seed == 20
+    assert "https://litellm.example.com/v1/images/edits" in log_text
+    assert len(captured_tasks) == 1
+    task_idx, fn, args = captured_tasks[0]
+    assert task_idx == 0
+    assert fn == node._single_gpt_request
+    assert args[0] == "https://litellm.example.com"
+    assert args[1] == "secret"
+    assert args[2] == "openai/gpt-image-2"
+    assert args[3] == "system\n\ntest prompt"
+    assert len(args[4]) == 1
+    assert torch.equal(args[4][0], image)
+    assert args[5] == "3:4"
+    assert args[6] == "2K"
+    assert args[7] == "high"
+    assert args[8] == 20
+    assert args[9] == "req-gpt"
+
+
+def test_aistudio_combo_single_gpt_request_uses_gpt_edits_payload(monkeypatch):
+    node = ZhiYiAiStudioImageComboNode()
+    image = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
+    captured = {}
+
+    def fake_call(**kwargs):
+        captured.update(kwargs)
+        return aistudio_image_combo_module.BytesIO(node._tensor_to_png_bytes(image)), "text", "https://example.com/result.png"
+
+    monkeypatch.setattr(node, "_call_gpt_image_with_retry_policy", fake_call)
+
+    result_image, task_id, result_url = node._single_gpt_request(
+        base_url="https://litellm.example.com",
+        api_key="secret",
+        model="gpt-image-2",
+        prompt="test prompt",
+        images=[image],
+        aspect_ratio="9:16",
+        image_size="1K",
+        quality="LOW",
+        seed=1,
+        out_request_id="req-1",
+    )
+
+    assert tuple(result_image.shape) == (1, 2, 2, 3)
+    assert task_id is None
+    assert result_url == "https://example.com/result.png"
+    assert captured["base_url"] == "https://litellm.example.com"
+    assert captured["api_key"] == "secret"
+    assert captured["data"] == {
+        "model": "gpt-image-2",
+        "prompt": "test prompt",
+        "size": "720x1280",
+        "quality": "low",
+        "user": "req-1",
+    }
+    assert len(captured["multipart_files"]) == 1
+    assert captured["multipart_files"][0][0] == "image"
