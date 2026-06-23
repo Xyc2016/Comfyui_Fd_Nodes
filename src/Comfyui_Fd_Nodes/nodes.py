@@ -907,7 +907,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "NodeToggleByID": "节点开关 (按ID)",
     "ZhiYiImageComboNode": "fd-输入参数组合",
     "ZhiYiImageToImageComboNode": "知衣-图生图-combo",
-    "ZhiYiAiStudioImageComboNode": "知衣-AiStudio图生图-combo",
+    "ZhiYiAiStudioImageComboNode": "api 图生图节点测试",
     "ZhiYiRemoveBgByMeituNode": "知衣-美图服装抠图",
     "ZhiYiRMBGNode": "知衣-RMBG2.0背景去除",
     "ZhiYiClothesSegmentNode": "知衣-衣物语义分割",

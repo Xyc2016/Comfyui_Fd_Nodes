@@ -158,15 +158,17 @@ def call_litellm_gemini_image(
     image_size,
     seed: int,
     out_request_id: str = "",
+    base_url: str = "",
+    api_key: str = "",
 ):
-    base_url = (FD_LITELLM_BASE_URL or "").rstrip("/")
-    api_key = FD_LITELLM_API_KEY
-    if not base_url or base_url == "https://your-api-base-url":
+    final_base_url = (base_url or FD_LITELLM_BASE_URL or "").rstrip("/")
+    final_api_key = api_key or FD_LITELLM_API_KEY
+    if not final_base_url or final_base_url == "https://your-api-base-url":
         raise RuntimeError("未配置 base_url，请在环境变量 FD_LITELLM_BASE_URL 中设置")
-    if not api_key or api_key == "your-api-key":
+    if not final_api_key or final_api_key == "your-api-key":
         raise RuntimeError("未配置 api_key，请在环境变量 FD_LITELLM_API_KEY 中设置")
 
-    url = f"{base_url}/v1/chat/completions"
+    url = f"{final_base_url}/v1/chat/completions"
     payload = {
         "stream": False,
         "model": model,
@@ -195,7 +197,7 @@ def call_litellm_gemini_image(
         response = requests.post(
             url=url,
             headers={
-                "Authorization": f"Bearer {api_key}",
+                "Authorization": f"Bearer {final_api_key}",
                 "Content-Type": "application/json",
             },
             data=json.dumps(payload),

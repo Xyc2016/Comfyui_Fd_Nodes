@@ -3,6 +3,7 @@ import torch
 
 from src.Comfyui_Fd_Nodes import aistudio_image_combo_node as aistudio_image_combo_module
 from src.Comfyui_Fd_Nodes.aistudio_image_combo_node import ZhiYiAiStudioImageComboNode
+from src.Comfyui_Fd_Nodes.nodes import NODE_DISPLAY_NAME_MAPPINGS
 
 
 def test_aistudio_combo_node_metadata():
@@ -19,12 +20,16 @@ def test_aistudio_combo_node_metadata():
         "seed_mode",
         "seed",
     ]
-    assert list(input_types["optional"])[-1] == "quality"
+    assert list(input_types["optional"])[-4:] == ["quality", "target_url", "api_key", "api_type"]
     assert input_types["optional"]["quality"][0] == ["low", "medium", "high"]
+    assert input_types["optional"]["target_url"][0] == "STRING"
+    assert input_types["optional"]["api_key"][0] == "STRING"
+    assert input_types["optional"]["api_type"][0] == ["auto", "gpt_image", "gemini_image", "aistudio_publish"]
     assert "combo_1" in input_types["optional"]
     assert ZhiYiAiStudioImageComboNode.RETURN_TYPES == ("IMAGE", "INT", "STRING")
     assert ZhiYiAiStudioImageComboNode.OUTPUT_IS_LIST == (True, False, False)
     assert {"base_url", "api_key"}.isdisjoint(input_types["required"])
+    assert NODE_DISPLAY_NAME_MAPPINGS["ZhiYiAiStudioImageComboNode"] == "api 图生图节点测试"
 
 
 def test_aistudio_combo_payload_normalizes_image_size_to_uppercase_k():
@@ -190,6 +195,8 @@ def test_aistudio_combo_generate_routes_gpt_image_model_to_litellm_without_uploa
         aspect_ratio="3:4",
         image_size="2K",
         quality="high",
+        target_url="https://custom-litellm.example.com/v1/images/edits",
+        api_key="custom-secret",
         batch_size=1,
         max_concurrency=1,
         seed_mode="固定种子",
@@ -201,13 +208,13 @@ def test_aistudio_combo_generate_routes_gpt_image_model_to_litellm_without_uploa
 
     assert images == ["image-1"]
     assert actual_seed == 20
-    assert "https://litellm.example.com/v1/images/edits" in log_text
+    assert "https://custom-litellm.example.com/v1/images/edits" in log_text
     assert len(captured_tasks) == 1
     task_idx, fn, args = captured_tasks[0]
     assert task_idx == 0
     assert fn == node._single_gpt_request
-    assert args[0] == "https://litellm.example.com"
-    assert args[1] == "secret"
+    assert args[0] == "https://custom-litellm.example.com"
+    assert args[1] == "custom-secret"
     assert args[2] == "openai/gpt-image-2"
     assert args[3] == "system\n\ntest prompt"
     assert len(args[4]) == 1
@@ -217,6 +224,59 @@ def test_aistudio_combo_generate_routes_gpt_image_model_to_litellm_without_uploa
     assert args[7] == "high"
     assert args[8] == 20
     assert args[9] == "req-gpt"
+
+
+def test_aistudio_combo_generate_routes_gemini_model_to_litellm_chat(monkeypatch):
+    node = ZhiYiAiStudioImageComboNode()
+    image = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
+    combo = {"images": [image], "prompts": ["test prompt"]}
+    captured_tasks = []
+
+    monkeypatch.setattr(node, "_upload_images", lambda images: pytest.fail("Gemini LiteLLM branch should not upload OSS URLs"))
+    monkeypatch.setattr(aistudio_image_combo_module, "tensor_to_base64", lambda _image: "AAA")
+
+    def fake_run_concurrent(tasks, max_workers, label="任务"):
+        captured_tasks.extend(tasks)
+        return (["image-1"], ["[请求 1] 成功"], None)
+
+    monkeypatch.setattr(node, "_run_concurrent", fake_run_concurrent)
+
+    images, actual_seed, log_text = node.generate(
+        model="google/gemini-3-pro-image-preview",
+        aspect_ratio="16:9",
+        image_size="4K",
+        target_url="https://custom-gemini.example.com/v1/chat/completions",
+        api_key="gemini-secret",
+        batch_size=1,
+        max_concurrency=1,
+        seed_mode="固定种子",
+        seed=30,
+        out_request_id="req-gemini",
+        combo_1=combo,
+        system_prompt="system",
+    )
+
+    assert images == ["image-1"]
+    assert actual_seed == 30
+    assert "https://custom-gemini.example.com/v1/chat/completions" in log_text
+    assert len(captured_tasks) == 1
+    task_idx, fn, args = captured_tasks[0]
+    assert task_idx == 0
+    assert fn == node._single_gemini_request
+    assert args[0] == "https://custom-gemini.example.com"
+    assert args[1] == "gemini-secret"
+    assert args[2] == "google/gemini-3-pro-image-preview"
+    assert args[4] == "16:9"
+    assert args[5] == "4K"
+    assert args[6] == 30
+    assert args[7] == "req-gemini"
+
+    messages = args[3]
+    assert messages[0]["role"] == "system"
+    assert messages[0]["content"][0]["text"] == "system"
+    assert messages[1]["role"] == "user"
+    assert messages[1]["content"][0]["text"] == "test prompt"
+    assert messages[1]["content"][1]["image_url"]["url"] == "data:image/png;base64,AAA"
 
 
 def test_aistudio_combo_single_gpt_request_uses_gpt_edits_payload(monkeypatch):
@@ -257,3 +317,37 @@ def test_aistudio_combo_single_gpt_request_uses_gpt_edits_payload(monkeypatch):
     }
     assert len(captured["multipart_files"]) == 1
     assert captured["multipart_files"][0][0] == "image"
+
+
+def test_aistudio_combo_single_gemini_request_uses_target_credentials(monkeypatch):
+    node = ZhiYiAiStudioImageComboNode()
+    captured = {}
+    output_image = torch.ones((1, 2, 2, 3), dtype=torch.float32)
+
+    def fake_call(**kwargs):
+        captured.update(kwargs)
+        return output_image
+
+    monkeypatch.setattr(aistudio_image_combo_module, "call_litellm_gemini_image", fake_call)
+
+    image, task_id, result_url = node._single_gemini_request(
+        base_url="https://litellm.example.com",
+        api_key="secret",
+        model="google/gemini-3-pro-image-preview",
+        messages=[{"role": "user", "content": [{"type": "text", "text": "test"}]}],
+        aspect_ratio="1:1",
+        image_size="2K",
+        seed=1,
+        out_request_id="req-1",
+    )
+
+    assert torch.equal(image, output_image)
+    assert task_id is None
+    assert result_url == ""
+    assert captured["base_url"] == "https://litellm.example.com"
+    assert captured["api_key"] == "secret"
+    assert captured["model"] == "google/gemini-3-pro-image-preview"
+    assert captured["aspect_ratio"] == "1:1"
+    assert captured["image_size"] == "2K"
+    assert captured["seed"] == 1
+    assert captured["out_request_id"] == "req-1"

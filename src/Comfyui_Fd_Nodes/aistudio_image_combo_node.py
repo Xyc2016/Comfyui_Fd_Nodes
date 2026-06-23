@@ -22,6 +22,7 @@ from .utils.common_util import downscale_image_tensor
 from .utils.error_utils import ERROR_TIMEOUT, normalize_error_message
 from .utils.gpt_image_request import GptImageRequestMixin
 from .utils.gpt_image_size import resolution_to_edit_size
+from .utils.litellm_gemini_image import build_litellm_messages, call_litellm_gemini_image, tensor_to_base64
 from .utils.logging_utils import configure_default_logging
 from .utils.oss_client import upload_bytes_to_oss
 
@@ -43,12 +44,13 @@ def _bytesio_to_image_tensor(image_bytesio):
 
 
 class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
-    """知衣 AiStudio 图生图 combo 节点 - 支持 AiStudio publish 与 LiteLLM GPT Image edits。"""
+    """API 图生图测试 combo 节点 - 支持 AiStudio publish、LiteLLM GPT Image edits 与 Gemini image。"""
 
     MODELS = ["nano-banana-pro"]
     ASPECT_RATIOS = ["", "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"]
     IMAGE_SIZES = ["4K", "2K", "1080P", "720P"]
     QUALITIES = ["low", "medium", "high"]
+    API_TYPES = ["auto", "gpt_image", "gemini_image", "aistudio_publish"]
     SEED_MODES = ["随机种子", "固定种子"]
 
     def __init__(self):
@@ -60,7 +62,7 @@ class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
             "required": {
                 "model": ("STRING", {
                     "default": cls.MODELS[0],
-                    "tooltip": "模型名称。填 gpt-image-2 / openai/gpt-image-2 等包含 gpt-image 的模型时走 LiteLLM GPT Image edits；其他模型保持 AiStudio publish 渠道。",
+                    "tooltip": "模型名称。auto 模式下包含 gpt-image 走 GPT Image edits，包含 gemini 走 LiteLLM Gemini image，其他保持 AiStudio publish。",
                 }),
                 "aspect_ratio": (cls.ASPECT_RATIOS, {"default": ""}),
                 "image_size": (cls.IMAGE_SIZES, {"default": "4K"}),
@@ -105,6 +107,18 @@ class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
                 "quality": (cls.QUALITIES, {
                     "default": "medium",
                     "tooltip": "GPT Image edits 质量参数，默认 medium。追加到 optional 末尾以兼容旧 workflow 的 widget 顺序；AiStudio publish 渠道会忽略该字段。",
+                }),
+                "target_url": ("STRING", {
+                    "default": "",
+                    "tooltip": "目标 URL。GPT/Gemini 可填 LiteLLM base URL 或完整 endpoint；AiStudio 可填 publish URL。留空使用环境变量。",
+                }),
+                "api_key": ("STRING", {
+                    "default": "",
+                    "tooltip": "API Key。GPT/Gemini 为空时使用 FD_LITELLM_API_KEY；AiStudio publish 渠道会忽略该字段。",
+                }),
+                "api_type": (cls.API_TYPES, {
+                    "default": "auto",
+                    "tooltip": "调用类型。auto 根据模型名判断；也可强制选择 gpt_image、gemini_image 或 aistudio_publish。",
                 }),
             },
         }
@@ -173,8 +187,25 @@ class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
     def _normalize_model_name(self, model):
         return str(model or "").strip() or self.MODELS[0]
 
+    def _resolve_api_type(self, api_type, model):
+        normalized_api_type = str(api_type or "auto").strip() or "auto"
+        if normalized_api_type != "auto":
+            return normalized_api_type
+        normalized_model = self._normalize_model_name(model).lower()
+        if "gpt-image" in normalized_model:
+            return "gpt_image"
+        if "gemini" in normalized_model:
+            return "gemini_image"
+        return "aistudio_publish"
+
     def _should_use_gpt_litellm(self, model):
-        return "gpt-image" in self._normalize_model_name(model).lower()
+        return self._resolve_api_type("auto", model) == "gpt_image"
+
+    def _normalize_litellm_base_url(self, target_url, endpoint_suffix):
+        base_url = str(target_url or "").strip().rstrip("/")
+        if base_url.endswith(endpoint_suffix):
+            base_url = base_url[:-len(endpoint_suffix)].rstrip("/")
+        return base_url
 
     def _build_gpt_size(self, aspect_ratio, image_size):
         normalized_size = self._normalize_image_size(image_size)
@@ -362,6 +393,47 @@ class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
         except Exception as exc:
             raise RuntimeError(normalize_error_message(exc)) from exc
 
+    def _single_gemini_request(
+        self,
+        base_url,
+        api_key,
+        model,
+        messages,
+        aspect_ratio,
+        image_size,
+        seed,
+        out_request_id="",
+    ):
+        normalized_model = self._normalize_model_name(model)
+        log_payload = {
+            "url": f"{base_url}/v1/chat/completions",
+            "model": normalized_model,
+            "aspect_ratio": aspect_ratio,
+            "image_size": image_size,
+            "seed": seed,
+            "out_request_id": out_request_id or None,
+        }
+        print(
+            "[API图生图节点测试] 调用 Gemini Image API 参数: "
+            f"{json.dumps(log_payload, ensure_ascii=False)}"
+        )
+        logger.info("Calling API image test Gemini Image API with payload=%s", log_payload)
+
+        try:
+            image = call_litellm_gemini_image(
+                base_url=base_url,
+                api_key=api_key,
+                messages=messages,
+                model=normalized_model,
+                aspect_ratio=aspect_ratio,
+                image_size=image_size,
+                seed=seed,
+                out_request_id=out_request_id,
+            )
+            return image, None, ""
+        except Exception as exc:
+            raise RuntimeError(normalize_error_message(exc)) from exc
+
     def _run_concurrent(self, tasks, max_workers, label="任务"):
         results = [None] * len(tasks)
         log_lines = []
@@ -393,22 +465,40 @@ class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
         return results, log_lines, last_error_message
 
     def generate(self, model, aspect_ratio, image_size, quality="medium",
+                 target_url="", api_key="", api_type="auto",
                  batch_size=1, max_concurrency=16, seed_mode="随机种子", seed=0,
                  out_request_id="",
                  combo_1=None, combo_2=None, combo_3=None, combo_4=None,
                  combo_5=None, combo_6=None, combo_7=None, combo_8=None,
                  system_prompt=""):
         normalized_model = self._normalize_model_name(model)
-        use_gpt_litellm = self._should_use_gpt_litellm(normalized_model)
-        publish_url = FD_AISTUDIO_PUBLISH_URL
-        litellm_base_url = (FD_LITELLM_BASE_URL or "").rstrip("/")
-        litellm_api_key = FD_LITELLM_API_KEY or ""
+        resolved_api_type = self._resolve_api_type(api_type, normalized_model)
+        use_gpt_litellm = resolved_api_type == "gpt_image"
+        use_gemini_litellm = resolved_api_type == "gemini_image"
+        normalized_target_url = str(target_url or "").strip()
+        publish_url = normalized_target_url or FD_AISTUDIO_PUBLISH_URL
+        litellm_base_url = ""
+        litellm_api_key = str(api_key or "").strip() or FD_LITELLM_API_KEY or ""
+        target_endpoint = publish_url
 
         if use_gpt_litellm:
+            litellm_base_url = self._normalize_litellm_base_url(
+                normalized_target_url or FD_LITELLM_BASE_URL,
+                "/v1/images/edits",
+            )
+            target_endpoint = f"{litellm_base_url}/v1/images/edits" if litellm_base_url else ""
+        elif use_gemini_litellm:
+            litellm_base_url = self._normalize_litellm_base_url(
+                normalized_target_url or FD_LITELLM_BASE_URL,
+                "/v1/chat/completions",
+            )
+            target_endpoint = f"{litellm_base_url}/v1/chat/completions" if litellm_base_url else ""
+
+        if use_gpt_litellm or use_gemini_litellm:
             if not litellm_base_url:
-                raise RuntimeError("未配置 base_url，请在环境变量 FD_LITELLM_BASE_URL 中设置")
+                raise RuntimeError("未配置 target_url/base_url，请填写 target_url 或设置环境变量 FD_LITELLM_BASE_URL")
             if not litellm_api_key:
-                raise RuntimeError("未配置 api_key，请在环境变量 FD_LITELLM_API_KEY 中设置")
+                raise RuntimeError("未配置 api_key，请填写 api_key 或设置环境变量 FD_LITELLM_API_KEY")
         elif not publish_url:
             raise RuntimeError("未配置 AiStudio publish URL，请设置环境变量 FD_AISTUDIO_PUBLISH_URL")
 
@@ -434,9 +524,21 @@ class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
                 if not expanded_images:
                     raise RuntimeError("无有效图片")
 
-                image_urls = None if use_gpt_litellm else self._upload_images(expanded_images)
+                if use_gpt_litellm:
+                    image_urls = None
+                    image_b64_list = None
+                elif use_gemini_litellm:
+                    image_urls = None
+                    image_b64_list = [tensor_to_base64(image) for image in expanded_images]
+                else:
+                    image_urls = self._upload_images(expanded_images)
+                    image_b64_list = None
                 for p_idx, prompt in enumerate(combo_prompts):
-                    combined_prompt = self._compose_prompt(prompt, system_prompt)
+                    if use_gemini_litellm:
+                        messages = build_litellm_messages(prompt, image_b64_list, system_prompt)
+                        combined_prompt = None
+                    else:
+                        combined_prompt = self._compose_prompt(prompt, system_prompt)
                     for b_idx in range(batch_size):
                         task_seed = (
                             actual_seed + task_idx
@@ -463,6 +565,21 @@ class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
                                     aspect_ratio,
                                     image_size,
                                     quality,
+                                    task_seed,
+                                    out_request_id,
+                                ),
+                            ))
+                        elif use_gemini_litellm:
+                            tasks.append((
+                                task_idx,
+                                self._single_gemini_request,
+                                (
+                                    litellm_base_url,
+                                    litellm_api_key,
+                                    normalized_model,
+                                    messages,
+                                    aspect_ratio,
+                                    image_size,
                                     task_seed,
                                     out_request_id,
                                 ),
@@ -500,8 +617,7 @@ class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
         results, log_lines, last_error_message = self._run_concurrent(tasks, max_concurrency, label="请求")
 
         successful = [result for result in results if result is not None]
-        target_url = f"{litellm_base_url}/v1/images/edits" if use_gpt_litellm else publish_url
-        header = f"总计: {len(successful)}/{len(tasks)} 成功, url={target_url}"
+        header = f"总计: {len(successful)}/{len(tasks)} 成功, url={target_endpoint}"
         if pre_errors:
             header += f"\n预处理失败 {len(pre_errors)} 个: " + "; ".join(pre_errors)
         log_lines.insert(0, header)
