@@ -1080,6 +1080,7 @@ def test_zhiyi_text_gen_request_logs_request_and_response(monkeypatch):
     captured_logs = []
 
     class DummyResponse:
+        ok = True
         status_code = 200
         text = '{"choices":[{"message":{"content":"hello text"}}]}'
 
@@ -1111,14 +1112,45 @@ def test_zhiyi_text_gen_request_logs_request_and_response(monkeypatch):
     assert result == ("hello text",)
     request_payload = next(value for key, value in captured_logs if key == "post_payload")
     assert request_payload["model"] == "gemini-3-pro-preview"
+    assert request_payload["messages"] == [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "say hello"},
+    ]
     request_log = next(args[0] for message, args in captured_logs if message == "Calling ZhiYi text API with payload=%s")
     assert request_log["messages"] == [
-        {"role": "system", "content": [{"type": "text", "text": "system prompt"}]},
-        {"role": "user", "content": [{"type": "text", "text": "say hello"}]},
+        {"role": "system", "text": "system prompt"},
+        {"role": "user", "text": "say hello"},
     ]
     response_log = next(args[0] for message, args in captured_logs if message == "ZhiYi text API response summary: %s")
     assert response_log["status_code"] == 200
     assert response_log["choice_count"] == 1
+
+
+def test_zhiyi_text_gen_http_error_includes_response_body(monkeypatch):
+    """Text API 4xx errors should preserve the LiteLLM response body."""
+    node = ZhiYiTextGenNode()
+
+    class DummyResponse:
+        ok = False
+        status_code = 400
+        text = '{"error":{"message":"invalid model or malformed messages"}}'
+
+        def json(self):
+            raise AssertionError("json should not be called for non-2xx responses")
+
+    monkeypatch.setattr(zhiyi_text_module, "load_config", lambda: {"base_url": "https://example.com", "api_key": "secret"})
+    monkeypatch.setattr(zhiyi_text_module.requests, "post", lambda *args, **kwargs: DummyResponse())
+
+    with pytest.raises(RuntimeError) as exc_info:
+        node.generate(
+            prompt="say hello",
+            node_switch=0,
+            system_prompt="system prompt",
+        )
+
+    message = str(exc_info.value)
+    assert "API 请求失败: 400" in message
+    assert "invalid model or malformed messages" in message
 
 
 def test_configure_default_logging_installs_timestamp_format(monkeypatch):

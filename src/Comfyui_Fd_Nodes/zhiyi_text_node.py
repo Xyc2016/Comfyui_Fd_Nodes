@@ -70,6 +70,24 @@ class ZhiYiTextGenNode:
             summary["content_length"] = len(content)
         return summary
 
+    def _summarize_messages_for_log(self, messages):
+        summarized_messages = []
+        for message in messages:
+            content = message.get("content", "")
+            summarized_message = {"role": message.get("role", "")}
+            if isinstance(content, str):
+                summarized_message["text"] = content
+            elif isinstance(content, list):
+                text_parts = []
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+                summarized_message["text"] = "\n".join(text_parts)
+            else:
+                summarized_message["content"] = content
+            summarized_messages.append(summarized_message)
+        return summarized_messages
+
     def generate(self, prompt, node_switch=1,
                  system_prompt="", temperature=0.7, max_tokens=2048):
         if node_switch == 1:
@@ -85,11 +103,11 @@ class ZhiYiTextGenNode:
         if system_prompt.strip():
             messages.append({
                 "role": "system",
-                "content": [{"type": "text", "text": system_prompt}],
+                "content": system_prompt,
             })
         messages.append({
             "role": "user",
-            "content": [{"type": "text", "text": prompt}],
+            "content": prompt,
         })
 
         payload = {
@@ -107,7 +125,7 @@ class ZhiYiTextGenNode:
                 "model": payload["model"],
                 "temperature": payload["temperature"],
                 "max_tokens": payload["max_tokens"],
-                "messages": messages,
+                "messages": self._summarize_messages_for_log(messages),
             },
         )
 
@@ -121,7 +139,8 @@ class ZhiYiTextGenNode:
                 data=json.dumps(payload),
                 timeout=600,
             )
-            response.raise_for_status()
+            if not response.ok:
+                raise RuntimeError(f"API 请求失败: {response.status_code}\n{response.text[:1000]}")
             result = response.json()
             logger.info(
                 "ZhiYi text API response summary: %s",
@@ -138,5 +157,7 @@ class ZhiYiTextGenNode:
             return (text,)
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"API 请求失败: {e}")
+        except RuntimeError:
+            raise
         except (KeyError, IndexError) as e:
             raise RuntimeError(f"解析响应失败: {e}\n原始响应: {response.text[:500]}")
