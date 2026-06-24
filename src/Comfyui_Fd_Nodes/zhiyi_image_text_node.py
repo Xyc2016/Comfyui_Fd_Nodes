@@ -12,6 +12,7 @@ configure_default_logging()
 logger = logging.getLogger(__name__)
 
 MAX_IMAGE_DATA_URL_BYTES = 10_000_000
+MAX_IMAGE_TOTAL_PIXELS = 35_000_000
 JPEG_QUALITY_STEPS = (85, 80, 75, 70, 65, 60)
 MIN_IMAGE_LONG_EDGE = 1024
 IMAGE_RESIZE_FACTOR = 0.8
@@ -88,20 +89,42 @@ class ZhiYiImageTextNode:
         )
         return pil_img.resize(new_size, Image.Resampling.LANCZOS)
 
+    def _resize_to_max_pixels(self, pil_img, max_pixels):
+        width, height = pil_img.size
+        total_pixels = width * height
+        if total_pixels <= max_pixels:
+            return pil_img
+
+        scale = (max_pixels / total_pixels) ** 0.5
+        new_size = (
+            max(1, int(width * scale)),
+            max(1, int(height * scale)),
+        )
+        return pil_img.resize(new_size, Image.Resampling.LANCZOS)
+
     def _image_tensor_to_data_url(self, image_tensor):
         original_img = self._image_tensor_to_pil(image_tensor)
         original_size = original_img.size
-        current_long_edge = max(original_size)
+        original_pixels = original_size[0] * original_size[1]
+        source_img = self._resize_to_max_pixels(original_img, MAX_IMAGE_TOTAL_PIXELS)
+        source_size = source_img.size
+        resized_by_pixels = source_size != original_size
+        current_long_edge = max(source_size)
         best_result = None
 
         while True:
-            candidate_img = self._resize_to_long_edge(original_img, current_long_edge)
+            candidate_img = self._resize_to_long_edge(source_img, current_long_edge)
+            final_pixels = candidate_img.size[0] * candidate_img.size[1]
             for quality in JPEG_QUALITY_STEPS:
                 data_url, image_bytes = self._encode_jpeg_data_url(candidate_img, quality)
                 data_url_bytes = len(data_url.encode("utf-8"))
                 info = {
                     "original_size": original_size,
                     "final_size": candidate_img.size,
+                    "original_pixels": original_pixels,
+                    "final_pixels": final_pixels,
+                    "max_total_pixels": MAX_IMAGE_TOTAL_PIXELS,
+                    "resized_by_pixels": resized_by_pixels,
                     "mime_type": "image/jpeg",
                     "quality": quality,
                     "image_bytes": image_bytes,
@@ -225,7 +248,8 @@ class ZhiYiImageTextNode:
                 data=json.dumps(payload),
                 timeout=600,
             )
-            response.raise_for_status()
+            if not response.ok:
+                raise RuntimeError(f"API 请求失败: {response.status_code}\n{response.text[:1000]}")
             result = response.json()
             logger.info(
                 "ZhiYi image-to-text API response summary: %s",
@@ -242,5 +266,7 @@ class ZhiYiImageTextNode:
             return (text,)
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"API 请求失败: {e}")
+        except RuntimeError:
+            raise
         except (KeyError, IndexError) as e:
             raise RuntimeError(f"解析响应失败: {e}\n原始响应: {response.text[:500]}")

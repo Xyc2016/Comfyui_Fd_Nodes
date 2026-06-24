@@ -8,6 +8,7 @@ import logging
 
 import pytest
 import torch
+from PIL import Image
 from src.Comfyui_Fd_Nodes.gpt_image_edit_node import GPTImageEditNode
 from src.Comfyui_Fd_Nodes.gpt_image_combo_node import FD_GPTImageComboNode
 from src.Comfyui_Fd_Nodes.gpt_multi_image_node import FD_GPTMultiImage
@@ -675,6 +676,7 @@ def test_zhiyi_image_text_request_logs_request_and_response_without_images(monke
     captured_logs = []
 
     class DummyResponse:
+        ok = True
         status_code = 200
         text = '{"choices":[{"message":{"content":"hello"}}]}'
 
@@ -694,6 +696,10 @@ def test_zhiyi_image_text_request_logs_request_and_response_without_images(monke
             {
                 "original_size": (1, 1),
                 "final_size": (1, 1),
+                "original_pixels": 1,
+                "final_pixels": 1,
+                "max_total_pixels": zhiyi_image_text_module.MAX_IMAGE_TOTAL_PIXELS,
+                "resized_by_pixels": False,
                 "mime_type": "image/jpeg",
                 "quality": 85,
                 "image_bytes": 3,
@@ -748,8 +754,47 @@ def test_zhiyi_image_text_encodes_small_image_as_jpeg_data_url():
     assert len(data_url.encode("utf-8")) <= zhiyi_image_text_module.MAX_IMAGE_DATA_URL_BYTES
     assert info["original_size"] == (16, 16)
     assert info["final_size"] == (16, 16)
+    assert info["original_pixels"] == 256
+    assert info["final_pixels"] == 256
+    assert info["max_total_pixels"] == zhiyi_image_text_module.MAX_IMAGE_TOTAL_PIXELS
+    assert info["resized_by_pixels"] is False
     assert info["quality"] == 85
     assert info["resized"] is False
+
+
+def test_zhiyi_image_text_resize_to_max_pixels_preserves_ratio_without_upscaling():
+    """Images above the model pixel limit should be downscaled before encoding."""
+    node = ZhiYiImageTextNode()
+    large_image = Image.new("RGB", (5386, 7137))
+
+    resized = node._resize_to_max_pixels(large_image, zhiyi_image_text_module.MAX_IMAGE_TOTAL_PIXELS)
+
+    width, height = resized.size
+    assert width * height <= zhiyi_image_text_module.MAX_IMAGE_TOTAL_PIXELS
+    assert width < 5386
+    assert height < 7137
+    assert abs((width / height) - (5386 / 7137)) < 0.001
+
+    small_image = Image.new("RGB", (100, 80))
+    assert node._resize_to_max_pixels(small_image, zhiyi_image_text_module.MAX_IMAGE_TOTAL_PIXELS) is small_image
+
+
+def test_zhiyi_image_text_data_url_info_tracks_pixel_resize(monkeypatch):
+    """Encoded image info should expose pixel-limit resizing details."""
+    node = ZhiYiImageTextNode()
+    image = torch.zeros((1, 200, 200, 3), dtype=torch.float32)
+
+    monkeypatch.setattr(zhiyi_image_text_module, "MAX_IMAGE_TOTAL_PIXELS", 10_000)
+
+    data_url, info = node._image_tensor_to_data_url(image)
+
+    assert data_url.startswith("data:image/jpeg;base64,")
+    assert info["original_size"] == (200, 200)
+    assert info["original_pixels"] == 40_000
+    assert info["final_pixels"] <= 10_000
+    assert info["max_total_pixels"] == 10_000
+    assert info["resized_by_pixels"] is True
+    assert info["resized"] is True
 
 
 def test_zhiyi_image_text_recompresses_until_data_url_is_under_limit(monkeypatch):
@@ -768,6 +813,8 @@ def test_zhiyi_image_text_recompresses_until_data_url_is_under_limit(monkeypatch
     assert info["data_url_bytes"] <= 50_000
     assert info["final_size"][0] <= 512
     assert info["final_size"][1] <= 512
+    assert info["final_pixels"] == info["final_size"][0] * info["final_size"][1]
+    assert info["max_total_pixels"] == zhiyi_image_text_module.MAX_IMAGE_TOTAL_PIXELS
     assert info["resized"] is True
 
 
@@ -781,6 +828,34 @@ def test_zhiyi_image_text_raises_clear_error_when_image_cannot_fit(monkeypatch):
 
     with pytest.raises(RuntimeError, match="10MB 传输限制"):
         node._image_tensor_to_data_url(image)
+
+
+def test_zhiyi_image_text_http_error_includes_response_body(monkeypatch):
+    """LiteLLM 4xx errors should preserve the response body for debugging."""
+    node = ZhiYiImageTextNode()
+
+    class DummyResponse:
+        ok = False
+        status_code = 400
+        text = '{"error":{"message":"Image exceeds max pixels"}}'
+
+        def json(self):
+            raise AssertionError("json should not be called for non-2xx responses")
+
+    monkeypatch.setattr(zhiyi_image_text_module, "load_config", lambda: {"base_url": "https://example.com", "api_key": "secret"})
+    monkeypatch.setattr(node, "_image_tensor_to_data_url", lambda _image: ("data:image/jpeg;base64,AAA", {}))
+    monkeypatch.setattr(zhiyi_image_text_module.requests, "post", lambda *args, **kwargs: DummyResponse())
+
+    with pytest.raises(RuntimeError) as exc_info:
+        node.generate(
+            image=torch.zeros((1, 2, 2, 3), dtype=torch.float32),
+            prompt="describe this image",
+            node_switch=0,
+        )
+
+    message = str(exc_info.value)
+    assert "API 请求失败: 400" in message
+    assert "Image exceeds max pixels" in message
 
 
 def test_zhiyi_image_text_combo_registered_and_accepts_combo_inputs():
