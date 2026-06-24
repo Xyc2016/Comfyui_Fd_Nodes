@@ -112,7 +112,7 @@ class ZhiYiTextGenNode:
 
         payload = {
             "stream": False,
-            "model": "gemini-3-pro-preview",
+            "model": "doubao-seed-2.0-mini",
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,

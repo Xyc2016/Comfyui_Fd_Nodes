@@ -1111,7 +1111,7 @@ def test_zhiyi_text_gen_request_logs_request_and_response(monkeypatch):
 
     assert result == ("hello text",)
     request_payload = next(value for key, value in captured_logs if key == "post_payload")
-    assert request_payload["model"] == "gemini-3-pro-preview"
+    assert request_payload["model"] == "doubao-seed-2.0-mini"
     assert request_payload["messages"] == [
         {"role": "system", "content": "system prompt"},
         {"role": "user", "content": "say hello"},
