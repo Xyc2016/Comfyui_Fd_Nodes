@@ -57,6 +57,7 @@ from .sam2_segment_node import ZhiYiSAM2SegmentNode
 from .zhiyi_controlnet_aux_node import ZhiYiDepthAnythingV2PreprocessorNode, ZhiYiLineArtPreprocessorNode
 from .zhiyi_dwpose_detect_node import ZhiYiDWPoseDetectNode
 from .zhiyi_qwen_detect_node import ZhiYiBBoxesToSAM2, ZhiYiQwenDetectNode
+from .pattern_extraction_node import PatternChooseBackgroundPair, PatternDualBackgroundToRGBA
 from .utils.gpt_image_size import resolution_to_image_generation_edit_size
 
 configure_default_logging()
@@ -883,6 +884,8 @@ NODE_CLASS_MAPPINGS = {
     "ZhiYiDepthAnythingV2PreprocessorNode": ZhiYiDepthAnythingV2PreprocessorNode,
     "ZhiYiQwenDetectNode": ZhiYiQwenDetectNode,
     "ZhiYiBBoxesToSAM2": ZhiYiBBoxesToSAM2,
+    "PatternChooseBackgroundPair+": PatternChooseBackgroundPair,
+    "PatternDualBackgroundToRGBA+": PatternDualBackgroundToRGBA,
 }
 
 # A dictionary that contains the friendly/humanly readable titles for the nodes
@@ -919,4 +922,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ZhiYiDepthAnythingV2PreprocessorNode": "知衣-DepthAnythingV2深度图预处理",
     "ZhiYiQwenDetectNode": "知衣-Qwen目标检测",
     "ZhiYiBBoxesToSAM2": "知衣-BBox转SAM2格式",
+    "PatternChooseBackgroundPair+": "🔧 Pattern Choose Background Pair",
+    "PatternDualBackgroundToRGBA+": "🔧 Pattern Dual Background To RGBA",
 }
