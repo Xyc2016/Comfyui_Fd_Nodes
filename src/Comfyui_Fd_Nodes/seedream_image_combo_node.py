@@ -29,7 +29,7 @@ class FD_SeedreamImageComboNode:
     """Seedream 图生图 combo 节点 - 接收最多8个图片组合并发调用 Seedream API。"""
 
     MODELS = ["doubao-seedream-5.0-lite"]
-    IMAGE_SIZES = ["2K", "3K"]
+    IMAGE_SIZES = ["4K", "3K", "2K"]
     OUTPUT_FORMATS = ["png", "jpg"]
     SEED_MODES = ["随机种子", "固定种子"]
 

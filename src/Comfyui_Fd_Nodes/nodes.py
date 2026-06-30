@@ -611,7 +611,7 @@ class FD_SeedreamImage(ComfyNodeABC):
                     },
                 ),
                 "size": (
-                    ["2K", "3K"],
+                    ["4K", "3K", "2K"],
                     {
                         "default": "2K",
                         "tooltip": "Output image size",
