@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class ZhiYiImageToImageComboNode:
-    """知衣图生图节点 - 接收最多8个图片组合并发调用 API"""
+    """知衣图生图节点 - 接收最多10个图片组合并发调用 API"""
 
     MODELS = [
         "google/gemini-3-pro-image-preview",
@@ -83,6 +83,8 @@ class ZhiYiImageToImageComboNode:
                 "combo_6": ("ZHIYI_COMBO",),
                 "combo_7": ("ZHIYI_COMBO",),
                 "combo_8": ("ZHIYI_COMBO",),
+                "combo_9": ("ZHIYI_COMBO",),
+                "combo_10": ("ZHIYI_COMBO",),
                 "system_prompt": ("STRING", {
                     "default": "",
                     "multiline": True,
@@ -176,11 +178,12 @@ class ZhiYiImageToImageComboNode:
                  out_request_id="",
                  combo_1=None, combo_2=None, combo_3=None, combo_4=None,
                  combo_5=None, combo_6=None, combo_7=None, combo_8=None,
+                 combo_9=None, combo_10=None,
                  system_prompt=""):
         actual_seed = random.randint(0, 2147483647) if seed_mode == "随机种子" else seed
         use_litellm = should_use_litellm_gemini(model)
 
-        combos = [c for c in [combo_1, combo_2, combo_3, combo_4, combo_5, combo_6, combo_7, combo_8] if c is not None]
+        combos = [c for c in [combo_1, combo_2, combo_3, combo_4, combo_5, combo_6, combo_7, combo_8, combo_9, combo_10] if c is not None]
         if not combos:
             raise RuntimeError("未提供任何组合输入，请连接至少一个 combo")
 
