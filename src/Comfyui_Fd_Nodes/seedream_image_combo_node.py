@@ -19,6 +19,11 @@ from .utils.common_util import bytes_calculate_hex_md5, bytesio_to_image_tensor
 from .utils.error_utils import ERROR_TIMEOUT, normalize_error_message
 from .utils.logging_utils import configure_default_logging
 from .utils.oss_client import upload_bytes_to_oss
+from .utils.seedream_image_size import (
+    SEEDREAM_ASPECT_RATIOS,
+    SEEDREAM_IMAGE_SIZES,
+    resolution_to_seedream_size,
+)
 from .utils.webhook import webhook_send
 
 configure_default_logging()
@@ -29,7 +34,8 @@ class FD_SeedreamImageComboNode:
     """Seedream 图生图 combo 节点 - 接收最多8个图片组合并发调用 Seedream API。"""
 
     MODELS = ["doubao-seedream-5.0-lite"]
-    IMAGE_SIZES = ["4K", "3K", "2K"]
+    IMAGE_SIZES = SEEDREAM_IMAGE_SIZES
+    ASPECT_RATIOS = SEEDREAM_ASPECT_RATIOS
     OUTPUT_FORMATS = ["png", "jpg"]
     SEED_MODES = ["随机种子", "固定种子"]
 
@@ -76,6 +82,10 @@ class FD_SeedreamImageComboNode:
                 "system_prompt": ("STRING", {
                     "default": "",
                     "multiline": True,
+                }),
+                "aspect_ratio": (cls.ASPECT_RATIOS, {
+                    "default": "1:1",
+                    "tooltip": "Output aspect ratio. Converted to a Seedream pixel size before request.",
                 }),
             },
         }
@@ -135,12 +145,13 @@ class FD_SeedreamImageComboNode:
             return f"{system_text}\n\n{prompt_text}"
         return system_text or prompt_text
 
-    def _build_body(self, model, prompt, image_urls, size, output_format):
+    def _build_body(self, model, prompt, image_urls, size, output_format, aspect_ratio="1:1"):
+        request_size = resolution_to_seedream_size(size, aspect_ratio)
         return {
             "model": model,
             "prompt": prompt,
             "sequential_image_generation": "disabled",
-            "size": size,
+            "size": request_size,
             "output_format": output_format,
             "watermark": False,
             "image": image_urls,
@@ -176,13 +187,13 @@ class FD_SeedreamImageComboNode:
         response.raise_for_status()
         return bytesio_to_image_tensor(BytesIO(response.content))
 
-    def _single_request(self, base_url, api_key, model, prompt, image_urls, size, output_format, seed):
+    def _single_request(self, base_url, api_key, model, prompt, image_urls, size, output_format, seed, aspect_ratio="1:1"):
         if not prompt or not prompt.strip():
             raise RuntimeError("prompt 不能为空")
         if not image_urls:
             raise RuntimeError("未提供图片 URL")
 
-        body = self._build_body(model, prompt.strip(), image_urls, size, output_format)
+        body = self._build_body(model, prompt.strip(), image_urls, size, output_format, aspect_ratio)
         log_payload = self._summarize_request_for_log(body, seed)
 
         if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
@@ -280,7 +291,7 @@ class FD_SeedreamImageComboNode:
                  batch_size=1, max_concurrency=16, seed_mode="随机种子", seed=0,
                  combo_1=None, combo_2=None, combo_3=None, combo_4=None,
                  combo_5=None, combo_6=None, combo_7=None, combo_8=None,
-                 system_prompt=""):
+                 system_prompt="", aspect_ratio="1:1"):
         final_base_url = (FD_LITELLM_BASE_URL or "").rstrip("/")
         final_api_key = FD_LITELLM_API_KEY or ""
         if not final_base_url or final_base_url == "https://your-api-base-url":
@@ -338,6 +349,7 @@ class FD_SeedreamImageComboNode:
                                 size,
                                 output_format,
                                 task_seed,
+                                aspect_ratio,
                             ),
                         ))
                         task_idx += 1

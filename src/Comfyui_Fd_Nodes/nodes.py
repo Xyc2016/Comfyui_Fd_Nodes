@@ -59,6 +59,11 @@ from .zhiyi_dwpose_detect_node import ZhiYiDWPoseDetectNode
 from .zhiyi_qwen_detect_node import ZhiYiBBoxesToSAM2, ZhiYiQwenDetectNode
 from .pattern_extraction_node import PatternChooseBackgroundPair, PatternDualBackgroundToRGBA
 from .utils.gpt_image_size import resolution_to_image_generation_edit_size
+from .utils.seedream_image_size import (
+    SEEDREAM_ASPECT_RATIOS,
+    SEEDREAM_IMAGE_SIZES,
+    resolution_to_seedream_size,
+)
 
 configure_default_logging()
 logger = logging.getLogger(__name__)
@@ -611,10 +616,10 @@ class FD_SeedreamImage(ComfyNodeABC):
                     },
                 ),
                 "size": (
-                    ["4K", "3K", "2K"],
+                    SEEDREAM_IMAGE_SIZES,
                     {
                         "default": "2K",
-                        "tooltip": "Output image size",
+                        "tooltip": "Output image size preset",
                     },
                 ),
             },
@@ -633,6 +638,13 @@ class FD_SeedreamImage(ComfyNodeABC):
                         "tooltip": "Output image format",
                     },
                 ),
+                "aspect_ratio": (
+                    SEEDREAM_ASPECT_RATIOS,
+                    {
+                        "default": "1:1",
+                        "tooltip": "Output aspect ratio. Converted to a Seedream pixel size before request.",
+                    },
+                ),
             },
         }
 
@@ -649,13 +661,15 @@ class FD_SeedreamImage(ComfyNodeABC):
         size: str,
         images: Optional[IO.IMAGE] = None,
         output_format: str = "png",
+        aspect_ratio: str = "1:1",
         **kwargs,
     ):
+        request_size = resolution_to_seedream_size(size, aspect_ratio)
         body = {
             "model": model,
             "prompt": prompt,
             "sequential_image_generation": "disabled",
-            "size": size,
+            "size": request_size,
             "output_format": output_format,
             "watermark": False,
         }

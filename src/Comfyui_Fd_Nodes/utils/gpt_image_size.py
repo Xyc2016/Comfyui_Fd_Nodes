@@ -16,6 +16,7 @@ def resolution_to_edit_size(resolution: str, aspect_ratio: str) -> str:
             "16:9": "1280x720",
             "9:16": "720x1280",
             "21:9": "1456x624",
+            "9:21": "624x1456",
         },
         "2K": {
             "": "2048x2048",
@@ -29,6 +30,7 @@ def resolution_to_edit_size(resolution: str, aspect_ratio: str) -> str:
             "16:9": "2048x1152",
             "9:16": "1152x2048",
             "21:9": "2016x864",
+            "9:21": "864x2016",
         },
         "4K": {
             "": "2880x2880",
@@ -42,6 +44,7 @@ def resolution_to_edit_size(resolution: str, aspect_ratio: str) -> str:
             "16:9": "3840x2160",
             "9:16": "2160x3840",
             "21:9": "3840x1648",
+            "9:21": "1648x3840",
         },
     }
     normalized_resolution = resolution if resolution in size_map else "2K"

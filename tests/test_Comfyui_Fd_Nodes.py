@@ -19,6 +19,7 @@ from src.Comfyui_Fd_Nodes.nodes import (
     NODE_DISPLAY_NAME_MAPPINGS,
     _resolution_to_edit_size,
 )
+from src.Comfyui_Fd_Nodes.utils.gpt_image_size import resolution_to_edit_size
 from src.Comfyui_Fd_Nodes.prompt_nodes import EcommercePromptGenerator, PromptListSelector
 from src.Comfyui_Fd_Nodes import zhiyi_image_text_combo_node as zhiyi_image_text_combo_module
 from src.Comfyui_Fd_Nodes import zhiyi_image_text_node as zhiyi_image_text_module
@@ -82,6 +83,22 @@ def test_fd_gtp_image_metadata_and_size_mapping():
     assert _resolution_to_edit_size("4K", "1:1") == "4K"
     assert _resolution_to_edit_size("4K", "3:4") == "4K"
     assert _resolution_to_edit_size("4K", "9:16") == "2160x3840"
+
+
+def test_gpt_aspect_ratios_include_9_21():
+    """All GPT nodes and the size map should include the 9:21 aspect ratio."""
+    # FD_GPTMultiImage
+    assert "9:21" in FD_GPTMultiImage.ASPECT_RATIOS
+    # FD_GPTImageComboNode
+    assert "9:21" in FD_GPTImageComboNode.ASPECT_RATIOS
+    # FD_GTPImage (uses IO.COMBO options)
+    gtp_image_aspect_ratios = FD_GTPImage.INPUT_TYPES()["optional"]["aspect_ratio"][1]["options"]
+    assert "9:21" in gtp_image_aspect_ratios
+
+    # Size map values
+    assert resolution_to_edit_size("1K", "9:21") == "624x1456"
+    assert resolution_to_edit_size("2K", "9:21") == "864x2016"
+    assert resolution_to_edit_size("4K", "9:21") == "1648x3840"
 
 
 def test_fd_gtp_image_requires_input_image():
