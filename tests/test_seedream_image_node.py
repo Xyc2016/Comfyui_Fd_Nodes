@@ -5,6 +5,7 @@ from src.Comfyui_Fd_Nodes.nodes import FD_SeedreamImage
 def test_seedream_image_node_metadata_exposes_aspect_ratio():
     input_types = FD_SeedreamImage.INPUT_TYPES()
 
+    assert input_types["required"]["model"][0] == ["doubao-seedream-5.0-lite", "doubao-seedream-5.0-pro"]
     assert input_types["required"]["size"][0] == ["4K", "3K", "2K"]
     assert "1K" not in input_types["required"]["size"][0]
     assert input_types["optional"]["aspect_ratio"][0] == ["1:1", "3:4", "4:3", "16:9", "9:16", "3:2", "2:3", "21:9"]

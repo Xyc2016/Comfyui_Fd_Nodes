@@ -9,7 +9,7 @@ from src.Comfyui_Fd_Nodes.seedream_image_combo_node import FD_SeedreamImageCombo
 def test_seedream_combo_node_metadata():
     input_types = FD_SeedreamImageComboNode.INPUT_TYPES()
 
-    assert input_types["required"]["model"][0] == ["doubao-seedream-5.0-lite"]
+    assert input_types["required"]["model"][0] == ["doubao-seedream-5.0-lite", "doubao-seedream-5.0-pro"]
     assert input_types["required"]["size"][0] == ["4K", "3K", "2K"]
     assert input_types["required"]["output_format"][0] == ["png", "jpg"]
     assert "combo_1" in input_types["optional"]

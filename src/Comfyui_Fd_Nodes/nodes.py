@@ -591,7 +591,7 @@ class FD_ZImageTurboGenImage(ComfyNodeABC):
 
 class FD_SeedreamImage(ComfyNodeABC):
     """
-    Node to generate images using Seedream 5.0 Lite model.
+    Node to generate images using Seedream 5.0 models.
     """
     def __init__(self):
         pass
@@ -609,7 +609,7 @@ class FD_SeedreamImage(ComfyNodeABC):
                     },
                 ),
                 "model": (
-                    ["doubao-seedream-5.0-lite"],
+                    ["doubao-seedream-5.0-lite", "doubao-seedream-5.0-pro"],
                     {
                         "default": "doubao-seedream-5.0-lite",
                         "tooltip": "Model to use for generation",
@@ -651,7 +651,7 @@ class FD_SeedreamImage(ComfyNodeABC):
     RETURN_TYPES = (IO.IMAGE, )
     FUNCTION = "api_call"
     CATEGORY = "image/generation"
-    DESCRIPTION = "Generate images using Seedream 5.0 Lite model."
+    DESCRIPTION = "Generate images using Seedream 5.0 models."
     API_NODE = True
 
     def api_call(
