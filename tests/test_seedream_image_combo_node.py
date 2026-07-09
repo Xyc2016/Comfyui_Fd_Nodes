@@ -81,6 +81,52 @@ def test_seedream_combo_single_request_posts_generation_payload(monkeypatch):
     assert captured[1] == ("download", "https://example.com/result.png")
 
 
+def test_seedream_combo_single_request_omits_sequential_image_generation_for_pro(monkeypatch):
+    node = FD_SeedreamImageComboNode()
+    captured = []
+
+    class DummyPostResponse:
+        ok = True
+        status_code = 200
+        text = '{"data":[{"url":"https://example.com/result.png"}]}'
+
+        def json(self):
+            return {"data": [{"url": "https://example.com/result.png"}]}
+
+    def fake_post(url, headers, json, timeout):
+        captured.append(("post", url, headers, json, timeout))
+        return DummyPostResponse()
+
+    monkeypatch.setattr(seedream_combo_module.requests, "post", fake_post)
+    monkeypatch.setattr(node, "_download_result_image", lambda result_url: "fake-image")
+
+    result = node._single_request(
+        base_url="https://example.com",
+        api_key="secret",
+        model="doubao-seedream-5.0-pro",
+        prompt="test prompt",
+        image_urls=["https://example.com/input.png"],
+        size="2K",
+        output_format="png",
+        seed=123,
+        aspect_ratio="1:1",
+    )
+
+    assert result == ("fake-image", None, "https://example.com/result.png")
+    request_body = captured[0][3]
+    assert request_body == {
+        "model": "doubao-seedream-5.0-pro",
+        "prompt": "test prompt",
+        "size": "2048x2048",
+        "output_format": "png",
+        "watermark": False,
+        "image": ["https://example.com/input.png"],
+    }
+    assert "sequential_image_generation" not in request_body
+    assert "aspect_ratio" not in request_body
+    assert "ratio" not in request_body
+
+
 def test_seedream_combo_generate_reuses_uploaded_urls_and_keeps_combo_shape(monkeypatch):
     node = FD_SeedreamImageComboNode()
     combo = {

@@ -147,15 +147,17 @@ class FD_SeedreamImageComboNode:
 
     def _build_body(self, model, prompt, image_urls, size, output_format, aspect_ratio="1:1"):
         request_size = resolution_to_seedream_size(size, aspect_ratio)
-        return {
+        body = {
             "model": model,
             "prompt": prompt,
-            "sequential_image_generation": "disabled",
             "size": request_size,
             "output_format": output_format,
             "watermark": False,
             "image": image_urls,
         }
+        if model == "doubao-seedream-5.0-lite":
+            body["sequential_image_generation"] = "disabled"
+        return body
 
     def _summarize_request_for_log(self, body, seed):
         return {

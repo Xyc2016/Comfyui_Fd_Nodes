@@ -668,11 +668,12 @@ class FD_SeedreamImage(ComfyNodeABC):
         body = {
             "model": model,
             "prompt": prompt,
-            "sequential_image_generation": "disabled",
             "size": request_size,
             "output_format": output_format,
             "watermark": False,
         }
+        if model == "doubao-seedream-5.0-lite":
+            body["sequential_image_generation"] = "disabled"
 
         # Upload images to OSS if provided
         if images is not None:

@@ -54,6 +54,47 @@ def test_seedream_image_node_sends_pixel_size_without_ratio_fields(monkeypatch):
     assert headers["Content-Type"] == "application/json"
     assert timeout == 300
     assert request_body["size"] == "6240x2656"
+    assert request_body["sequential_image_generation"] == "disabled"
     assert "aspect_ratio" not in request_body
     assert "ratio" not in request_body
     assert captured[1] == ("get", "https://example.com/result.png")
+
+
+def test_seedream_image_node_omits_sequential_image_generation_for_pro(monkeypatch):
+    node = FD_SeedreamImage()
+    captured = []
+
+    class DummyPostResponse:
+        status_code = 200
+        content = b'{"data":[{"url":"https://example.com/result.png"}]}'
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": [{"url": "https://example.com/result.png"}]}
+
+    class DummyGetResponse:
+        content = b"fake-image"
+
+    def fake_post(url, headers, json, timeout):
+        captured.append(("post", url, headers, json, timeout))
+        return DummyPostResponse()
+
+    monkeypatch.setattr(nodes_module.requests, "post", fake_post)
+    monkeypatch.setattr(nodes_module.requests, "get", lambda url: DummyGetResponse())
+    monkeypatch.setattr(nodes_module, "bytesio_to_image_tensor", lambda _image_bytesio: "fake-image")
+
+    result = node.api_call(
+        prompt="test prompt",
+        model="doubao-seedream-5.0-pro",
+        size="2K",
+        output_format="png",
+        aspect_ratio="1:1",
+    )
+
+    assert result == ("fake-image",)
+    request_body = captured[0][3]
+    assert request_body["model"] == "doubao-seedream-5.0-pro"
+    assert request_body["size"] == "2048x2048"
+    assert "sequential_image_generation" not in request_body
