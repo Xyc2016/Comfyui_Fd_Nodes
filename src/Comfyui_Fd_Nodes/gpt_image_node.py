@@ -6,7 +6,7 @@ from comfy.comfy_types.node_typing import IO, ComfyNodeABC, InputTypeDict
 from .config import FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL
 from .utils.common_util import bytesio_to_image_tensor
 from .utils.gpt_image_edit_client import get_default_gpt_image_edit_client
-from .utils.gpt_image_size import resolution_to_image_generation_edit_size
+from .utils.gpt_image_size import resolution_to_image_generation_edit_size, resolve_gpt_image_size
 from .utils.logging_utils import configure_default_logging
 from .utils.webhook import webhook_send
 
@@ -107,6 +107,13 @@ class FD_GTPImage(ComfyNodeABC):
                         "tooltip": "是否让 image-generation 对 gpt-image-2 结果做后置 resize。关闭时直接返回上游原图。",
                     },
                 ),
+                "size_override": (
+                    IO.STRING,
+                    {
+                        "default": "",
+                        "tooltip": "可选。填精确像素尺寸 WIDTHxHEIGHT（如 1537x1025）时覆盖预设分辨率与宽高比，原样传给 image 服务；留空继续使用现有预设工作流。",
+                    },
+                ),
             },
             "hidden": {
                 "auth_token": "AUTH_TOKEN_COMFY_ORG",
@@ -134,6 +141,7 @@ class FD_GTPImage(ComfyNodeABC):
         files=None,
         seed: int = 42,
         unique_id: Optional[str] = None,
+        size_override: str = "",
         **kwargs,
     ):
         del files, seed, unique_id, kwargs
@@ -143,7 +151,12 @@ class FD_GTPImage(ComfyNodeABC):
         if not prompt or not prompt.strip():
             raise ValueError("FD_GTPImage requires a non-empty prompt.")
 
-        size = _resolution_to_edit_size(resolution or "2K", aspect_ratio)
+        preset_size = _resolution_to_edit_size(resolution or "2K", aspect_ratio)
+        size, effective_aspect_ratio = resolve_gpt_image_size(
+            preset_size=preset_size,
+            aspect_ratio=aspect_ratio or "",
+            size_override=size_override,
+        )
         request_images = [images[i : i + 1] for i in range(images.shape[0])]
 
         if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
@@ -176,7 +189,7 @@ class FD_GTPImage(ComfyNodeABC):
             image_tensors=request_images,
             prompt=prompt.strip(),
             size=size,
-            aspect_ratio=aspect_ratio or "",
+            aspect_ratio=effective_aspect_ratio,
             quality=quality,
             resize=resize,
             out_request_id=out_request_id if out_request_id != "default" else "",

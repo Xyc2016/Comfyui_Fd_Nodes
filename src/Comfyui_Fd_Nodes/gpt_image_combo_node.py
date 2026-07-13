@@ -7,7 +7,7 @@ from .config import FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL
 from .utils.common_util import bytesio_to_image_tensor
 from .utils.error_utils import normalize_error_message
 from .utils.gpt_image_edit_client import get_default_gpt_image_edit_client
-from .utils.gpt_image_size import resolution_to_image_generation_edit_size
+from .utils.gpt_image_size import resolution_to_image_generation_edit_size, resolve_gpt_image_size
 from .utils.logging_utils import configure_default_logging
 from .utils.webhook import webhook_send
 
@@ -77,6 +77,10 @@ class FD_GPTImageComboNode:
                     "default": True,
                     "tooltip": "是否让 image-generation 对 gpt-image-2 结果做后置 resize。关闭时直接返回上游原图。",
                 }),
+                "size_override": ("STRING", {
+                    "default": "",
+                    "tooltip": "可选。填精确像素尺寸 WIDTHxHEIGHT（如 1537x1025）时覆盖预设分辨率与宽高比，原样传给 image 服务；留空继续使用现有预设工作流。",
+                }),
             },
         }
 
@@ -121,13 +125,19 @@ class FD_GPTImageComboNode:
         quality,
         resize,
         out_request_id="",
+        size_override="",
     ):
         if not prompt or not prompt.strip():
             raise RuntimeError("prompt 不能为空")
         if not images:
             raise RuntimeError("未提供图片")
 
-        size = self._build_gpt_size(aspect_ratio, image_size)
+        preset_size = self._build_gpt_size(aspect_ratio, image_size)
+        size, effective_aspect_ratio = resolve_gpt_image_size(
+            preset_size=preset_size,
+            aspect_ratio=aspect_ratio or "",
+            size_override=size_override,
+        )
 
         if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
             try:
@@ -156,7 +166,7 @@ class FD_GPTImageComboNode:
             image_tensors=images,
             prompt=prompt.strip(),
             size=size,
-            aspect_ratio=aspect_ratio or "",
+            aspect_ratio=effective_aspect_ratio,
             quality=quality,
             resize=resize,
             out_request_id=out_request_id,
@@ -199,7 +209,7 @@ class FD_GPTImageComboNode:
                  out_request_id="",
                  combo_1=None, combo_2=None, combo_3=None, combo_4=None,
                  combo_5=None, combo_6=None, combo_7=None, combo_8=None,
-                 system_prompt=""):
+                 system_prompt="", size_override=""):
         del model
 
         actual_seed = random.randint(0, 2147483647) if seed_mode == "随机种子" else seed
@@ -250,6 +260,7 @@ class FD_GPTImageComboNode:
                                 quality,
                                 resize,
                                 out_request_id,
+                                size_override,
                             ),
                         ))
                         task_idx += 1

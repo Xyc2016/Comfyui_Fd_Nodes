@@ -1,3 +1,34 @@
+import re
+
+from typing import Optional, Tuple
+
+_SIZE_OVERRIDE_RE = re.compile(r"^[1-9][0-9]*x[1-9][0-9]*$")
+
+
+def resolve_gpt_image_size(
+    *,
+    preset_size: str,
+    aspect_ratio: str,
+    size_override: Optional[str],
+) -> Tuple[str, str]:
+    """根据 preset_size / aspect_ratio / size_override 决策最终 (size, aspect_ratio)。
+
+    - size_override 为空：完全等价旧行为，返回 (preset_size, aspect_ratio)。
+    - size_override 合法 `WIDTHxHEIGHT`（正整数、小写 x、无空格）：原样透传，比例清空为 ""。
+    - size_override 非空但非法：立即 ValueError，避免静默回退预设。
+
+    合法时不做 int 再格式化、不补 16 倍数、不卡边长 / 总像素，能力约束留给 image 服务。
+    """
+    normalized_override = (size_override or "").strip()
+    if not normalized_override:
+        return preset_size, aspect_ratio
+    if not _SIZE_OVERRIDE_RE.match(normalized_override):
+        raise ValueError(
+            f"size_override 需为 WIDTHxHEIGHT 格式（正整数、小写 x，如 1537x1025），实际收到: {size_override!r}"
+        )
+    return normalized_override, ""
+
+
 def resolution_to_edit_size(resolution: str, aspect_ratio: str) -> str:
     # gpt-image-2 accepts flexible sizes, but they must satisfy strict bounds:
     # edge <= 3840, edges are multiples of 16, ratio <= 3:1,

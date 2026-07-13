@@ -21,7 +21,7 @@ from .config import (
 from .utils.common_util import downscale_image_tensor
 from .utils.error_utils import ERROR_TIMEOUT, normalize_error_message
 from .utils.gpt_image_request import GptImageRequestMixin
-from .utils.gpt_image_size import resolution_to_edit_size
+from .utils.gpt_image_size import resolution_to_edit_size, resolve_gpt_image_size
 from .utils.litellm_gemini_image import build_litellm_messages, call_litellm_gemini_image, tensor_to_base64
 from .utils.logging_utils import configure_default_logging
 from .utils.oss_client import upload_bytes_to_oss
@@ -119,6 +119,10 @@ class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
                 "api_type": (cls.API_TYPES, {
                     "default": "auto",
                     "tooltip": "调用类型。auto 根据模型名判断；也可强制选择 gpt_image、gemini_image 或 aistudio_publish。",
+                }),
+                "size_override": ("STRING", {
+                    "default": "",
+                    "tooltip": "可选。填精确像素尺寸 WIDTHxHEIGHT（如 1537x1025）时覆盖预设分辨率与宽高比，原样传给 image 服务。仅 GPT Image edits 路由生效，其他路由忽略该字段。",
                 }),
             },
         }
@@ -346,6 +350,7 @@ class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
         quality,
         seed,
         out_request_id="",
+        size_override="",
     ):
         if not prompt or not prompt.strip():
             raise RuntimeError("prompt 不能为空")
@@ -353,7 +358,12 @@ class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
             raise RuntimeError("未提供图片")
 
         normalized_model = self._normalize_model_name(model)
-        size = self._build_gpt_size(aspect_ratio, image_size)
+        preset_size = self._build_gpt_size(aspect_ratio, image_size)
+        size, _ = resolve_gpt_image_size(
+            preset_size=preset_size,
+            aspect_ratio="",
+            size_override=size_override,
+        )
         normalized_quality = self._normalize_quality(quality)
         data = {
             "model": normalized_model,
@@ -381,7 +391,7 @@ class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
         logger.info("Calling ZhiYi AiStudio GPT Image API with payload=%s", log_payload)
 
         try:
-            image_bytesio, _, result_url = self._call_gpt_image_with_retry_policy(
+            image_bytesio, _, result_url = self._request_gpt_image_edit(
                 base_url=base_url,
                 api_key=api_key,
                 data=data,
@@ -470,7 +480,7 @@ class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
                  out_request_id="",
                  combo_1=None, combo_2=None, combo_3=None, combo_4=None,
                  combo_5=None, combo_6=None, combo_7=None, combo_8=None,
-                 system_prompt=""):
+                 system_prompt="", size_override=""):
         normalized_model = self._normalize_model_name(model)
         resolved_api_type = self._resolve_api_type(api_type, normalized_model)
         use_gpt_litellm = resolved_api_type == "gpt_image"
@@ -567,6 +577,7 @@ class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
                                     quality,
                                     task_seed,
                                     out_request_id,
+                                    size_override,
                                 ),
                             ))
                         elif use_gemini_litellm:
