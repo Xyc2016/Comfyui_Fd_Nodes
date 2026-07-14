@@ -1,9 +1,12 @@
+import json
+
 import pytest
 import torch
 
 from src.Comfyui_Fd_Nodes import aistudio_image_combo_node as aistudio_image_combo_module
 from src.Comfyui_Fd_Nodes.aistudio_image_combo_node import ZhiYiAiStudioImageComboNode
 from src.Comfyui_Fd_Nodes.nodes import NODE_DISPLAY_NAME_MAPPINGS
+from src.Comfyui_Fd_Nodes.utils import litellm_gemini_image as litellm_gemini_image_module
 
 
 def test_aistudio_combo_node_metadata():
@@ -20,7 +23,7 @@ def test_aistudio_combo_node_metadata():
         "seed_mode",
         "seed",
     ]
-    assert list(input_types["optional"])[-4:] == ["quality", "target_url", "api_key", "api_type"]
+    assert list(input_types["optional"])[-5:] == ["quality", "target_url", "api_key", "api_type", "size_override"]
     assert input_types["optional"]["quality"][0] == ["low", "medium", "high"]
     assert input_types["optional"]["target_url"][0] == "STRING"
     assert input_types["optional"]["api_key"][0] == "STRING"
@@ -242,11 +245,12 @@ def test_aistudio_combo_generate_routes_gemini_model_to_litellm_chat(monkeypatch
     monkeypatch.setattr(node, "_run_concurrent", fake_run_concurrent)
 
     images, actual_seed, log_text = node.generate(
-        model="google/gemini-3-pro-image-preview",
-        aspect_ratio="16:9",
+        model="gemini-3-pro-image-preview",
+        aspect_ratio="3:4",
         image_size="4K",
         target_url="https://custom-gemini.example.com/v1/chat/completions",
         api_key="gemini-secret",
+        api_type="auto",
         batch_size=1,
         max_concurrency=1,
         seed_mode="固定种子",
@@ -265,8 +269,8 @@ def test_aistudio_combo_generate_routes_gemini_model_to_litellm_chat(monkeypatch
     assert fn == node._single_gemini_request
     assert args[0] == "https://custom-gemini.example.com"
     assert args[1] == "gemini-secret"
-    assert args[2] == "google/gemini-3-pro-image-preview"
-    assert args[4] == "16:9"
+    assert args[2] == "gemini-3-pro-image-preview"
+    assert args[4] == "3:4"
     assert args[5] == "4K"
     assert args[6] == 30
     assert args[7] == "req-gemini"
@@ -288,7 +292,7 @@ def test_aistudio_combo_single_gpt_request_uses_gpt_edits_payload(monkeypatch):
         captured.update(kwargs)
         return aistudio_image_combo_module.BytesIO(node._tensor_to_png_bytes(image)), "text", "https://example.com/result.png"
 
-    monkeypatch.setattr(node, "_call_gpt_image_with_retry_policy", fake_call)
+    monkeypatch.setattr(node, "_request_gpt_image_edit", fake_call)
 
     result_image, task_id, result_url = node._single_gpt_request(
         base_url="https://litellm.example.com",
@@ -351,3 +355,124 @@ def test_aistudio_combo_single_gemini_request_uses_target_credentials(monkeypatc
     assert captured["image_size"] == "2K"
     assert captured["seed"] == 1
     assert captured["out_request_id"] == "req-1"
+
+
+def test_litellm_gemini_image_posts_snake_case_image_config(monkeypatch):
+    captured = {}
+    output_image = torch.ones((1, 2, 2, 3), dtype=torch.float32)
+    messages = [{"role": "user", "content": [{"type": "text", "text": "test"}]}]
+
+    class DummyResponse:
+        ok = True
+        status_code = 200
+        text = "ok"
+
+        def json(self):
+            return {
+                "choices": [{
+                    "message": {
+                        "images": [{"image_url": {"url": "data:image/png;base64,AAA"}}],
+                    },
+                }],
+            }
+
+    def fake_post(url, headers, data, timeout):
+        captured.update({
+            "url": url,
+            "headers": headers,
+            "body": json.loads(data),
+            "timeout": timeout,
+        })
+        return DummyResponse()
+
+    monkeypatch.setattr(litellm_gemini_image_module.requests, "post", fake_post)
+    monkeypatch.setattr(litellm_gemini_image_module, "base64_to_tensor", lambda data_url: output_image)
+
+    image = litellm_gemini_image_module.call_litellm_gemini_image(
+        base_url="https://litellm.example.com",
+        api_key="secret",
+        messages=messages,
+        model="gemini-3-pro-image-preview",
+        aspect_ratio="3:4",
+        image_size="2K",
+        seed=1,
+        out_request_id="req-1",
+    )
+
+    assert torch.equal(image, output_image)
+    assert captured["url"] == "https://litellm.example.com/v1/chat/completions"
+    assert captured["headers"] == {
+        "Authorization": "Bearer secret",
+        "Content-Type": "application/json",
+    }
+    assert captured["timeout"] == 600
+    assert captured["body"] == {
+        "stream": False,
+        "model": "gemini-3-pro-image-preview",
+        "messages": messages,
+        "modalities": ["image"],
+        "image_config": {
+            "aspect_ratio": "3:4",
+            "image_size": "2K",
+        },
+        "user": "req-1",
+    }
+    assert "imageConfig" not in captured["body"]
+    assert "ratio" not in captured["body"]
+
+
+@pytest.mark.parametrize(
+    ("aspect_ratio", "image_size", "expected_image_config"),
+    [
+        ("", "2K", {"image_size": "2K"}),
+        (None, "2K", {"image_size": "2K"}),
+        ("3:4", "", {"aspect_ratio": "3:4"}),
+        ("", "", None),
+    ],
+)
+def test_litellm_gemini_image_omits_empty_image_config_values(
+    monkeypatch,
+    aspect_ratio,
+    image_size,
+    expected_image_config,
+):
+    captured = {}
+
+    class DummyResponse:
+        ok = True
+        status_code = 200
+        text = "ok"
+
+        def json(self):
+            return {
+                "choices": [{
+                    "message": {
+                        "images": [{"image_url": {"url": "data:image/png;base64,AAA"}}],
+                    },
+                }],
+            }
+
+    def fake_post(url, headers, data, timeout):
+        captured.update(json.loads(data))
+        return DummyResponse()
+
+    monkeypatch.setattr(litellm_gemini_image_module.requests, "post", fake_post)
+    monkeypatch.setattr(litellm_gemini_image_module, "base64_to_tensor", lambda data_url: "image")
+
+    result = litellm_gemini_image_module.call_litellm_gemini_image(
+        base_url="https://litellm.example.com",
+        api_key="secret",
+        messages=[{"role": "user", "content": "test"}],
+        model="gemini-3-pro-image-preview",
+        aspect_ratio=aspect_ratio,
+        image_size=image_size,
+        seed=1,
+    )
+
+    assert result == "image"
+    if expected_image_config is None:
+        assert "image_config" not in captured
+    else:
+        assert captured["image_config"] == expected_image_config
+    assert "imageConfig" not in captured
+    assert "ratio" not in captured

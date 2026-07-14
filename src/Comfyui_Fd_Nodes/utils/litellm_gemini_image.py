@@ -173,9 +173,15 @@ def call_litellm_gemini_image(
         "stream": False,
         "model": model,
         "messages": messages,
-        "imageConfig": {"aspect_ratio": aspect_ratio, "image_size": image_size},
         "modalities": ["image"],
     }
+    image_config = {}
+    if aspect_ratio:
+        image_config["aspect_ratio"] = aspect_ratio
+    if image_size:
+        image_config["image_size"] = image_size
+    if image_config:
+        payload["image_config"] = image_config
     if out_request_id:
         payload["user"] = out_request_id
     logger.info(
@@ -184,7 +190,7 @@ def call_litellm_gemini_image(
             "url": url,
             "stream": payload["stream"],
             "model": payload["model"],
-            "imageConfig": payload["imageConfig"],
+            "image_config": payload.get("image_config"),
             "modalities": payload["modalities"],
             "user": payload.get("user"),
             "seed": seed,
