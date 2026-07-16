@@ -12,9 +12,15 @@ import requests
 import torch
 from PIL import Image
 
-from .config import FD_CONTROLNET_AUX_DEPTH_ANYTHING_V2_URL, FD_CONTROLNET_AUX_LINEART_URL
+from .config import (
+    CUSTOM_SERVICE_URL_PRESET,
+    DWPOSE_SERVICE_URL_PRESETS,
+    FD_CONTROLNET_AUX_DEPTH_ANYTHING_V2_URL,
+    FD_CONTROLNET_AUX_LINEART_URL,
+)
 from .utils.error_utils import ERROR_TIMEOUT, normalize_error_message
 from .utils.logging_utils import configure_default_logging
+from .utils.service_url import resolve_service_url_preset, service_url_preset_options
 
 configure_default_logging()
 logger = logging.getLogger(__name__)
@@ -290,6 +296,7 @@ class _ControlNetAuxApiBase:
         timeout,
         health_check,
         node_switch,
+        service_url_preset,
         extra,
         info_extra,
     ):
@@ -299,7 +306,12 @@ class _ControlNetAuxApiBase:
                 json.dumps({"skipped": True, "reason": "node_switch"}, ensure_ascii=False),
             )
 
-        final_service_url = _normalize_preprocess_url(service_url, default_url, endpoint)
+        selected_service_url = resolve_service_url_preset(
+            service_url,
+            service_url_preset,
+            DWPOSE_SERVICE_URL_PRESETS,
+        )
+        final_service_url = _normalize_preprocess_url(selected_service_url, default_url, endpoint)
         image_tensors = self._expand_images(image)
         if not image_tensors:
             raise RuntimeError("未提供图片")
@@ -368,6 +380,10 @@ class ZhiYiLineArtPreprocessorNode(_ControlNetAuxApiBase):
             "optional": {
                 "health_check": ("BOOLEAN", {"default": False}),
                 "node_switch": ("INT", {"default": 0, "min": 0, "max": 1, "step": 1}),
+                "service_url_preset": (service_url_preset_options(DWPOSE_SERVICE_URL_PRESETS), {
+                    "default": CUSTOM_SERVICE_URL_PRESET,
+                    "tooltip": "选择部署预设时忽略 service_url；选择自定义时使用 service_url 文本框",
+                }),
             },
         }
 
@@ -388,6 +404,7 @@ class ZhiYiLineArtPreprocessorNode(_ControlNetAuxApiBase):
         timeout,
         health_check=False,
         node_switch=0,
+        service_url_preset=None,
     ):
         return self._execute(
             image=image,
@@ -402,6 +419,7 @@ class ZhiYiLineArtPreprocessorNode(_ControlNetAuxApiBase):
             timeout=timeout,
             health_check=health_check,
             node_switch=node_switch,
+            service_url_preset=service_url_preset,
             extra={"coarse": bool(coarse)},
             info_extra={"coarse": bool(coarse)},
         )
@@ -449,6 +467,10 @@ class ZhiYiDepthAnythingV2PreprocessorNode(_ControlNetAuxApiBase):
             "optional": {
                 "health_check": ("BOOLEAN", {"default": False}),
                 "node_switch": ("INT", {"default": 0, "min": 0, "max": 1, "step": 1}),
+                "service_url_preset": (service_url_preset_options(DWPOSE_SERVICE_URL_PRESETS), {
+                    "default": CUSTOM_SERVICE_URL_PRESET,
+                    "tooltip": "选择部署预设时忽略 service_url；选择自定义时使用 service_url 文本框",
+                }),
             },
         }
 
@@ -469,6 +491,7 @@ class ZhiYiDepthAnythingV2PreprocessorNode(_ControlNetAuxApiBase):
         timeout,
         health_check=False,
         node_switch=0,
+        service_url_preset=None,
     ):
         return self._execute(
             image=image,
@@ -483,6 +506,7 @@ class ZhiYiDepthAnythingV2PreprocessorNode(_ControlNetAuxApiBase):
             timeout=timeout,
             health_check=health_check,
             node_switch=node_switch,
+            service_url_preset=service_url_preset,
             extra={"max_depth": float(max_depth)},
             info_extra={"max_depth": float(max_depth)},
         )

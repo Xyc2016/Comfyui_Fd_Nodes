@@ -96,5 +96,14 @@ FD_CLOTHES_SEGMENT_URL = os.getenv("FD_CLOTHES_SEGMENT_URL", "http://10.1.0.230:
 FD_FASHION_SEGMENT_URL = os.getenv("FD_FASHION_SEGMENT_URL", "http://10.1.0.230:8003/v1/segment/fashion")
 FD_BODY_SEGMENT_URL = os.getenv("FD_BODY_SEGMENT_URL", "http://10.1.0.230:8003/v1/segment/body")
 
+CUSTOM_SERVICE_URL_PRESET = "自定义（使用 service_url）"
+DWPOSE_SERVICE_URL_PRESETS = (
+    ("K8s 灰度", "http://model-api-dwpose-svc.online-server-gray:8001"),
+    ("10.1.0.230", "http://10.1.0.230:8003"),
+)
+RMBG_SERVICE_URL_PRESETS = (
+    ("10.1.0.230", "http://10.1.0.230:8003"),
+)
+
 assert FD_LITELLM_BASE_URL, "FD_LITELLM_BASE_URL is not set"
 assert FD_LITELLM_API_KEY, "FD_LITELLM_API_KEY is not set"

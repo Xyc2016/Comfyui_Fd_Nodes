@@ -8,6 +8,7 @@ import torch
 from PIL import Image
 
 from src.Comfyui_Fd_Nodes import zhiyi_dwpose_detect_node as dwpose_module
+from src.Comfyui_Fd_Nodes.config import CUSTOM_SERVICE_URL_PRESET
 from src.Comfyui_Fd_Nodes.nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 from src.Comfyui_Fd_Nodes.zhiyi_dwpose_detect_node import (
     ZhiYiDWPoseDetectNode,
@@ -65,6 +66,10 @@ def test_dwpose_node_metadata():
     assert input_types["required"]["detect_face"][1]["default"] is False
     assert "health_check" in input_types["optional"]
     assert "node_switch" in input_types["optional"]
+    assert list(input_types["optional"])[-1] == "service_url_preset"
+    preset_options, preset_config = input_types["optional"]["service_url_preset"]
+    assert preset_options == [CUSTOM_SERVICE_URL_PRESET, "K8s 灰度", "10.1.0.230"]
+    assert preset_config["default"] == CUSTOM_SERVICE_URL_PRESET
     assert ZhiYiDWPoseDetectNode.RETURN_TYPES == ("IMAGE", "POSE_KEYPOINT", "JSON")
     assert ZhiYiDWPoseDetectNode.RETURN_NAMES == ("POSE_IMAGE", "POSE_KEYPOINT", "INFO")
     assert ZhiYiDWPoseDetectNode.CATEGORY == "知衣/姿态检测"
@@ -149,6 +154,72 @@ def test_detect_pose_posts_payload_and_decodes_outputs(monkeypatch):
     assert info["detect_hand"] is False
     assert info["items"][0]["request_id"] == "pose-1"
     assert info["items"][0]["people_count"] == 1
+
+
+def test_detect_pose_preset_overrides_custom_url(monkeypatch):
+    node = ZhiYiDWPoseDetectNode()
+
+    def fake_request(method, url, timeout, **kwargs):
+        assert method == "POST"
+        assert url == "http://10.1.0.230:8003/v1/pose"
+        return DummyResponse(data=_pose_response())
+
+    monkeypatch.setattr(dwpose_module.requests, "request", fake_request)
+
+    _, _, info_text = node.detect_pose(
+        image=torch.zeros((1, 2, 2, 3), dtype=torch.float32),
+        service_url="https://custom.example.com/v1/pose",
+        resolution=512,
+        detect_body=True,
+        detect_hand=True,
+        detect_face=False,
+        xinsr_stick_scaling=False,
+        upscale_method="INTER_CUBIC",
+        max_concurrency=1,
+        timeout=30,
+        service_url_preset="10.1.0.230",
+    )
+
+    assert json.loads(info_text)["service_url"] == "http://10.1.0.230:8003/v1/pose"
+
+
+def test_detect_pose_rejects_unknown_preset_but_node_switch_still_short_circuits(monkeypatch):
+    node = ZhiYiDWPoseDetectNode()
+    image = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
+
+    with pytest.raises(RuntimeError, match="未知的 service_url_preset"):
+        node.detect_pose(
+            image=image,
+            service_url="https://custom.example.com/v1/pose",
+            resolution=512,
+            detect_body=True,
+            detect_hand=True,
+            detect_face=False,
+            xinsr_stick_scaling=False,
+            upscale_method="INTER_CUBIC",
+            max_concurrency=1,
+            timeout=30,
+            service_url_preset="不存在",
+        )
+
+    monkeypatch.setattr(dwpose_module.requests, "request", lambda *args, **kwargs: pytest.fail("不应发出请求"))
+    result_image, keypoints, info_text = node.detect_pose(
+        image=image,
+        service_url="https://custom.example.com/v1/pose",
+        resolution=512,
+        detect_body=True,
+        detect_hand=True,
+        detect_face=False,
+        xinsr_stick_scaling=False,
+        upscale_method="INTER_CUBIC",
+        max_concurrency=1,
+        timeout=30,
+        node_switch=1,
+        service_url_preset="不存在",
+    )
+    assert torch.equal(result_image, image)
+    assert keypoints == []
+    assert json.loads(info_text)["skipped"] is True
 
 
 def test_detect_pose_batch_keeps_order_and_resizes_pose_image(monkeypatch):

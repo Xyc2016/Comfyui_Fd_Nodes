@@ -8,7 +8,7 @@ import torch
 from PIL import Image
 
 from src.Comfyui_Fd_Nodes import zhiyi_controlnet_aux_node as aux_module
-from src.Comfyui_Fd_Nodes.config import _derive_dwpose_preprocess_url
+from src.Comfyui_Fd_Nodes.config import CUSTOM_SERVICE_URL_PRESET, _derive_dwpose_preprocess_url
 from src.Comfyui_Fd_Nodes.nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 from src.Comfyui_Fd_Nodes.zhiyi_controlnet_aux_node import (
     ZhiYiDepthAnythingV2PreprocessorNode,
@@ -66,6 +66,10 @@ def test_lineart_node_metadata():
     assert input_types["required"]["service_url"][1]["default"].endswith("/v1/lineart")
     assert input_types["required"]["coarse"][1]["default"] is False
     assert "health_check" in input_types["optional"]
+    assert list(input_types["optional"])[-1] == "service_url_preset"
+    preset_options, preset_config = input_types["optional"]["service_url_preset"]
+    assert preset_options == [CUSTOM_SERVICE_URL_PRESET, "K8s 灰度", "10.1.0.230"]
+    assert preset_config["default"] == CUSTOM_SERVICE_URL_PRESET
     assert ZhiYiLineArtPreprocessorNode.RETURN_TYPES == ("IMAGE", "JSON")
     assert ZhiYiLineArtPreprocessorNode.RETURN_NAMES == ("LINEART_IMAGE", "INFO")
     assert ZhiYiLineArtPreprocessorNode.CATEGORY == "知衣/ControlNet预处理"
@@ -80,6 +84,10 @@ def test_depth_node_metadata():
     assert input_types["required"]["service_url"][1]["default"].endswith("/v1/depth-anything-v2")
     assert input_types["required"]["max_depth"][1]["default"] == 1.0
     assert "health_check" in input_types["optional"]
+    assert list(input_types["optional"])[-1] == "service_url_preset"
+    preset_options, preset_config = input_types["optional"]["service_url_preset"]
+    assert preset_options == [CUSTOM_SERVICE_URL_PRESET, "K8s 灰度", "10.1.0.230"]
+    assert preset_config["default"] == CUSTOM_SERVICE_URL_PRESET
     assert ZhiYiDepthAnythingV2PreprocessorNode.RETURN_TYPES == ("IMAGE", "JSON")
     assert ZhiYiDepthAnythingV2PreprocessorNode.RETURN_NAMES == ("DEPTH_IMAGE", "INFO")
     assert ZhiYiDepthAnythingV2PreprocessorNode.CATEGORY == "知衣/ControlNet预处理"
@@ -218,6 +226,46 @@ def test_depth_posts_payload_and_decodes_outputs(monkeypatch):
     assert info["max_depth"] == 2.5
     assert info["items"][0]["request_id"] == "depth-1"
     assert info["items"][0]["preprocessor"] == "DepthAnythingV2Preprocessor"
+
+
+def test_controlnet_presets_generate_node_specific_endpoints(monkeypatch):
+    calls = []
+
+    def fake_request(method, url, timeout, **kwargs):
+        calls.append(url)
+        preprocessor = "LineArtPreprocessor" if url.endswith("/lineart") else "DepthAnythingV2Preprocessor"
+        return DummyResponse(data=_preprocess_response(preprocessor=preprocessor))
+
+    monkeypatch.setattr(aux_module.requests, "request", fake_request)
+    image = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
+
+    _, lineart_info = ZhiYiLineArtPreprocessorNode().preprocess(
+        image=image,
+        service_url="https://custom.example.com/v1/lineart",
+        resolution=512,
+        coarse=False,
+        upscale_method="INTER_CUBIC",
+        max_concurrency=1,
+        timeout=30,
+        service_url_preset="10.1.0.230",
+    )
+    _, depth_info = ZhiYiDepthAnythingV2PreprocessorNode().preprocess(
+        image=image,
+        service_url="https://custom.example.com/v1/depth-anything-v2",
+        resolution=512,
+        max_depth=1.0,
+        upscale_method="INTER_CUBIC",
+        max_concurrency=1,
+        timeout=30,
+        service_url_preset="K8s 灰度",
+    )
+
+    assert calls == [
+        "http://10.1.0.230:8003/v1/lineart",
+        "http://model-api-dwpose-svc.online-server-gray:8001/v1/depth-anything-v2",
+    ]
+    assert json.loads(lineart_info)["service_url"] == calls[0]
+    assert json.loads(depth_info)["service_url"] == calls[1]
 
 
 def test_batch_keeps_order_and_resizes_processed_image(monkeypatch):

@@ -12,9 +12,17 @@ import requests
 import torch
 from PIL import Image, ImageColor
 
-from .config import FD_BODY_SEGMENT_URL, FD_CLOTHES_SEGMENT_URL, FD_FASHION_SEGMENT_URL, FD_RMBG_URL
+from .config import (
+    CUSTOM_SERVICE_URL_PRESET,
+    FD_BODY_SEGMENT_URL,
+    FD_CLOTHES_SEGMENT_URL,
+    FD_FASHION_SEGMENT_URL,
+    FD_RMBG_URL,
+    RMBG_SERVICE_URL_PRESETS,
+)
 from .utils.error_utils import ERROR_TIMEOUT, normalize_error_message
 from .utils.logging_utils import configure_default_logging
+from .utils.service_url import resolve_service_url_preset, service_url_preset_options
 
 configure_default_logging()
 logger = logging.getLogger(__name__)
@@ -522,6 +530,7 @@ class _RmbgSegmentApiBase:
         timeout,
         health_check,
         node_switch,
+        service_url_preset,
         extra,
         info_extra,
     ):
@@ -535,7 +544,12 @@ class _RmbgSegmentApiBase:
                 json.dumps({"skipped": True, "reason": "node_switch"}, ensure_ascii=False),
             )
 
-        final_service_url = _normalize_rmbg_segment_url(service_url, default_url, endpoint)
+        selected_service_url = resolve_service_url_preset(
+            service_url,
+            service_url_preset,
+            RMBG_SERVICE_URL_PRESETS,
+        )
+        final_service_url = _normalize_rmbg_segment_url(selected_service_url, default_url, endpoint)
         image_tensors = self._expand_images(image)
         if not image_tensors:
             raise RuntimeError("未提供图片")
@@ -614,6 +628,10 @@ class ZhiYiRMBGNode(_RmbgSegmentApiBase):
             "optional": {
                 "health_check": ("BOOLEAN", {"default": False}),
                 "node_switch": ("INT", {"default": 0, "min": 0, "max": 1, "step": 1}),
+                "service_url_preset": (service_url_preset_options(RMBG_SERVICE_URL_PRESETS), {
+                    "default": CUSTOM_SERVICE_URL_PRESET,
+                    "tooltip": "选择部署预设时忽略 service_url；选择自定义时使用 service_url 文本框",
+                }),
             },
         }
 
@@ -642,6 +660,7 @@ class ZhiYiRMBGNode(_RmbgSegmentApiBase):
         timeout,
         health_check=False,
         node_switch=0,
+        service_url_preset=None,
     ):
         return self._execute(
             image=image,
@@ -663,6 +682,7 @@ class ZhiYiRMBGNode(_RmbgSegmentApiBase):
             timeout=timeout,
             health_check=health_check,
             node_switch=node_switch,
+            service_url_preset=service_url_preset,
             extra={"sensitivity": float(sensitivity), "refine_foreground": bool(refine_foreground)},
             info_extra={"sensitivity": float(sensitivity), "refine_foreground": bool(refine_foreground)},
         )
@@ -701,6 +721,10 @@ class ZhiYiClothesSegmentNode(_RmbgSegmentApiBase):
             "optional": {
                 "health_check": ("BOOLEAN", {"default": False}),
                 "node_switch": ("INT", {"default": 0, "min": 0, "max": 1, "step": 1}),
+                "service_url_preset": (service_url_preset_options(RMBG_SERVICE_URL_PRESETS), {
+                    "default": CUSTOM_SERVICE_URL_PRESET,
+                    "tooltip": "选择部署预设时忽略 service_url；选择自定义时使用 service_url 文本框",
+                }),
             },
         }
 
@@ -728,6 +752,7 @@ class ZhiYiClothesSegmentNode(_RmbgSegmentApiBase):
         timeout,
         health_check=False,
         node_switch=0,
+        service_url_preset=None,
     ):
         selected_classes = self._parse_classes_text(classes, CLOTHES_CLASSES, allow_comma_split=True)
         return self._execute(
@@ -750,6 +775,7 @@ class ZhiYiClothesSegmentNode(_RmbgSegmentApiBase):
             timeout=timeout,
             health_check=health_check,
             node_switch=node_switch,
+            service_url_preset=service_url_preset,
             extra={"classes": selected_classes},
             info_extra={"classes": selected_classes},
         )
@@ -788,6 +814,10 @@ class ZhiYiFashionSegmentNode(_RmbgSegmentApiBase):
             "optional": {
                 "health_check": ("BOOLEAN", {"default": False}),
                 "node_switch": ("INT", {"default": 0, "min": 0, "max": 1, "step": 1}),
+                "service_url_preset": (service_url_preset_options(RMBG_SERVICE_URL_PRESETS), {
+                    "default": CUSTOM_SERVICE_URL_PRESET,
+                    "tooltip": "选择部署预设时忽略 service_url；选择自定义时使用 service_url 文本框",
+                }),
             },
         }
 
@@ -815,6 +845,7 @@ class ZhiYiFashionSegmentNode(_RmbgSegmentApiBase):
         timeout,
         health_check=False,
         node_switch=0,
+        service_url_preset=None,
     ):
         selected_classes = self._parse_classes_text(classes, FASHION_CLASSES, allow_comma_split=False)
         return self._execute(
@@ -837,6 +868,7 @@ class ZhiYiFashionSegmentNode(_RmbgSegmentApiBase):
             timeout=timeout,
             health_check=health_check,
             node_switch=node_switch,
+            service_url_preset=service_url_preset,
             extra={"classes": selected_classes},
             info_extra={"classes": selected_classes},
         )
@@ -881,6 +913,10 @@ class ZhiYiBodySegmentNode(_RmbgSegmentApiBase):
             "optional": {
                 "health_check": ("BOOLEAN", {"default": False}),
                 "node_switch": ("INT", {"default": 0, "min": 0, "max": 1, "step": 1}),
+                "service_url_preset": (service_url_preset_options(RMBG_SERVICE_URL_PRESETS), {
+                    "default": CUSTOM_SERVICE_URL_PRESET,
+                    "tooltip": "选择部署预设时忽略 service_url；选择自定义时使用 service_url 文本框",
+                }),
             },
         }
 
@@ -908,6 +944,7 @@ class ZhiYiBodySegmentNode(_RmbgSegmentApiBase):
         timeout,
         health_check=False,
         node_switch=0,
+        service_url_preset=None,
     ):
         selected_classes = self._parse_classes_text(classes, BODY_CLASSES, allow_comma_split=True)
         return self._execute(
@@ -930,6 +967,7 @@ class ZhiYiBodySegmentNode(_RmbgSegmentApiBase):
             timeout=timeout,
             health_check=health_check,
             node_switch=node_switch,
+            service_url_preset=service_url_preset,
             extra={"classes": selected_classes},
             info_extra={"classes": selected_classes, "process_res_ignored": True},
         )

@@ -8,6 +8,7 @@ import torch
 from PIL import Image
 
 from src.Comfyui_Fd_Nodes import zhiyi_rmbg_segment_node as rmbg_module
+from src.Comfyui_Fd_Nodes.config import CUSTOM_SERVICE_URL_PRESET
 from src.Comfyui_Fd_Nodes.nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 from src.Comfyui_Fd_Nodes.zhiyi_rmbg_segment_node import (
     BODY_CLASSES,
@@ -112,6 +113,11 @@ def test_rmbg_and_segment_node_metadata():
     for node_cls in (ZhiYiRMBGNode, ZhiYiClothesSegmentNode, ZhiYiFashionSegmentNode, ZhiYiBodySegmentNode):
         assert node_cls.RETURN_TYPES == ("IMAGE", "MASK", "IMAGE", "JSON")
         assert node_cls.RETURN_NAMES == ("IMAGE", "MASK", "MASK_IMAGE", "INFO")
+        input_types = node_cls.INPUT_TYPES()
+        assert list(input_types["optional"])[-1] == "service_url_preset"
+        preset_options, preset_config = input_types["optional"]["service_url_preset"]
+        assert preset_options == [CUSTOM_SERVICE_URL_PRESET, "10.1.0.230"]
+        assert preset_config["default"] == CUSTOM_SERVICE_URL_PRESET
 
     assert ZhiYiRMBGNode.CATEGORY == "知衣/抠图"
     assert ZhiYiClothesSegmentNode.CATEGORY == "知衣/语义分割"
@@ -142,6 +148,58 @@ def test_normalize_rmbg_segment_url_variants():
     )
     assert _health_url("https://example.com/v1/rmbg") == "https://example.com/health"
     assert _health_url("https://example.com/api/v1/segment/body") == "https://example.com/api/health"
+
+
+def test_rmbg_preset_generates_all_node_endpoints(monkeypatch):
+    image = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
+    cases = (
+        (ZhiYiRMBGNode(), "rmbg", "http://unused/v1/rmbg"),
+        (ZhiYiClothesSegmentNode(), "segment/clothes", "http://unused/v1/segment/clothes"),
+        (ZhiYiFashionSegmentNode(), "segment/fashion", "http://unused/v1/segment/fashion"),
+        (ZhiYiBodySegmentNode(), "segment/body", "http://unused/v1/segment/body"),
+    )
+
+    for node, endpoint, default_url in cases:
+        captured_urls = []
+
+        def fake_run_concurrent(tasks, max_concurrency, label):
+            captured_urls.append(tasks[0][2][2])
+            return [{
+                "image": image,
+                "mask": torch.zeros((1, 2, 2), dtype=torch.float32),
+                "mask_image": image,
+                "info": {},
+            }]
+
+        monkeypatch.setattr(node, "_run_concurrent", fake_run_concurrent)
+        _, _, _, info_text = node._execute(
+            image=image,
+            service_url="https://custom.example.com/v1/ignored",
+            endpoint=endpoint,
+            default_url=default_url,
+            health_key="test",
+            label="test",
+            process_res=512,
+            mask_blur=0,
+            mask_offset=0,
+            invert_output=False,
+            background="Alpha",
+            background_color="#222222",
+            return_image=True,
+            return_mask=True,
+            return_mask_image=False,
+            max_concurrency=1,
+            timeout=30,
+            health_check=False,
+            node_switch=0,
+            service_url_preset="10.1.0.230",
+            extra={},
+            info_extra={},
+        )
+
+        expected_url = f"http://10.1.0.230:8003/v1/{endpoint}"
+        assert captured_urls == [expected_url]
+        assert json.loads(info_text)["service_url"] == expected_url
 
 
 def test_parse_classes_preserves_fashion_comma_names():
