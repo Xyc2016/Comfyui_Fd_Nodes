@@ -24,11 +24,15 @@ class ZhiYiImageToImageNode:
 
     MODELS = [
         "google/gemini-3-pro-image-preview",
+        "google/gemini-3-pro-image-preview-stable",
+        "google/gemini-3-pro-image-preview-cheap",
         "google/gemini-3.1-flash-image-preview",
         "google/gemini-2.5-flash-image-preview",
         "google/gemini-3-pro-image-preview-official",
         "gemini-3-pro-image-preview",
         "batch/gemini-3-pro-image-preview",
+        "batch/gemini-3-pro-image-preview-stable",
+        "batch/gemini-3-pro-image-preview-cheap",
         "gemini-3.1-flash-image-preview",
         "gemini-2.5-flash-image-preview",
         "gemini-3-pro-image-preview-official",

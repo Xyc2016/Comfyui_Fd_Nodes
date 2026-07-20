@@ -54,7 +54,7 @@ def bytesio_to_image_tensor(image_bytesio: BytesIO, mode: str = "RGB") -> torch.
 
 def normalize_gemini_model_name(model: str) -> str:
     model_name = str(model or "").strip()
-    if model_name.startswith("google/"):
+    if model_name.startswith(("google/", "batch/")):
         return model_name
     return MODEL_NAME_MAP.get(model_name, f"google/{model_name}" if model_name else model_name)
 

@@ -24,7 +24,7 @@ from src.Comfyui_Fd_Nodes.prompt_nodes import EcommercePromptGenerator, PromptLi
 from src.Comfyui_Fd_Nodes import zhiyi_image_text_combo_node as zhiyi_image_text_combo_module
 from src.Comfyui_Fd_Nodes import zhiyi_image_text_node as zhiyi_image_text_module
 from src.Comfyui_Fd_Nodes import zhiyi_text_node as zhiyi_text_module
-from src.Comfyui_Fd_Nodes.old_gemini_api_node import FD_GeminiImage
+from src.Comfyui_Fd_Nodes.old_gemini_api_node import FD_GeminiImage, GeminiImageModel
 from src.Comfyui_Fd_Nodes.zhiyi_image_text_combo_node import ZhiYiImageTextComboNode
 from src.Comfyui_Fd_Nodes.zhiyi_image_text_node import ZhiYiImageTextNode
 from src.Comfyui_Fd_Nodes.zhiyi_image_to_image_combo_node import ZhiYiImageToImageComboNode
@@ -420,9 +420,13 @@ def test_zhiyi_image_to_image_nodes_expose_legacy_and_channel_models():
     expected_models = {
         "google/gemini-2.5-flash-image-preview",
         "google/gemini-3-pro-image-preview",
+        "google/gemini-3-pro-image-preview-stable",
+        "google/gemini-3-pro-image-preview-cheap",
         "google/gemini-3-pro-image-preview-official",
         "google/gemini-3.1-flash-image-preview",
         "batch/gemini-3-pro-image-preview",
+        "batch/gemini-3-pro-image-preview-stable",
+        "batch/gemini-3-pro-image-preview-cheap",
         "gemini-3.1-flash-image-preview",
         "gemini-3-pro-image-preview-aistudio",
         "gemini-3-pro-image-preview-siphonlab",
@@ -430,9 +434,22 @@ def test_zhiyi_image_to_image_nodes_expose_legacy_and_channel_models():
 
     assert expected_models.issubset(set(ZhiYiImageToImageNode.MODELS))
     assert expected_models.issubset(set(ZhiYiImageToImageComboNode.MODELS))
-    assert "batch/gemini-3-pro-image-preview" in FD_GeminiImage.INPUT_TYPES()["required"]["model"][1]["options"]
+    new_models = {
+        "google/gemini-3-pro-image-preview-stable",
+        "google/gemini-3-pro-image-preview-cheap",
+        "batch/gemini-3-pro-image-preview-stable",
+        "batch/gemini-3-pro-image-preview-cheap",
+    }
+    for model in new_models:
+        assert ZhiYiImageToImageNode.MODELS.count(model) == 1
+        assert ZhiYiImageToImageComboNode.MODELS.count(model) == 1
+    fd_models = FD_GeminiImage.INPUT_TYPES()["required"]["model"][1]["options"]
+    assert "batch/gemini-3-pro-image-preview" in fd_models
+    for model in new_models:
+        assert fd_models.count(model) == 1
     assert ZhiYiImageToImageNode.INPUT_TYPES()["required"]["model"][1]["default"] == "google/gemini-3-pro-image-preview"
     assert ZhiYiImageToImageComboNode.INPUT_TYPES()["required"]["model"][1]["default"] == "google/gemini-3-pro-image-preview"
+    assert FD_GeminiImage.INPUT_TYPES()["required"]["model"][1]["default"] == GeminiImageModel.gemini_2_5_flash_image_preview
 
 
 def test_gemini_service_builds_internal_request_body():
@@ -463,6 +480,22 @@ def test_gemini_service_builds_internal_request_body():
         image_url_list=["https://oss/input.png"],
     )
     assert old_batch_body["model"] == "batch/gemini-3-pro-image-preview"
+
+    new_models = [
+        "google/gemini-3-pro-image-preview-stable",
+        "google/gemini-3-pro-image-preview-cheap",
+        "batch/gemini-3-pro-image-preview-stable",
+        "batch/gemini-3-pro-image-preview-cheap",
+    ]
+    for model in new_models:
+        assert normalize_gemini_model_name(model) == model
+        body = client.build_request_body(
+            prompt="draw product",
+            model=model,
+            image_url_list=["https://oss/input.png"],
+        )
+        assert body["model"] == model
+        assert should_use_litellm_gemini(model) is False
 
     aistudio_body = client.build_request_body(
         prompt="draw product",
