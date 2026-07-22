@@ -422,6 +422,8 @@ def test_zhiyi_image_to_image_nodes_expose_legacy_and_channel_models():
         "google/gemini-3-pro-image-preview",
         "google/gemini-3-pro-image-preview-stable",
         "google/gemini-3-pro-image-preview-cheap",
+        "gemini-3-pro-image-preview-stable",
+        "gemini-3-pro-image-preview-cheap",
         "google/gemini-3-pro-image-preview-official",
         "google/gemini-3.1-flash-image-preview",
         "batch/gemini-3-pro-image-preview",
@@ -437,6 +439,8 @@ def test_zhiyi_image_to_image_nodes_expose_legacy_and_channel_models():
     new_models = {
         "google/gemini-3-pro-image-preview-stable",
         "google/gemini-3-pro-image-preview-cheap",
+        "gemini-3-pro-image-preview-stable",
+        "gemini-3-pro-image-preview-cheap",
         "batch/gemini-3-pro-image-preview-stable",
         "batch/gemini-3-pro-image-preview-cheap",
     }
@@ -496,6 +500,20 @@ def test_gemini_service_builds_internal_request_body():
         )
         assert body["model"] == model
         assert should_use_litellm_gemini(model) is False
+
+    aliases = {
+        "gemini-3-pro-image-preview-stable": "google/gemini-3-pro-image-preview-stable",
+        "gemini-3-pro-image-preview-cheap": "google/gemini-3-pro-image-preview-cheap",
+    }
+    for alias, normalized in aliases.items():
+        assert normalize_gemini_model_name(alias) == normalized
+        body = client.build_request_body(
+            prompt="draw product",
+            model=alias,
+            image_url_list=["https://oss/input.png"],
+        )
+        assert body["model"] == normalized
+        assert should_use_litellm_gemini(alias) is False
 
     aistudio_body = client.build_request_body(
         prompt="draw product",

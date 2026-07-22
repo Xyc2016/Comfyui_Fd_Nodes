@@ -75,6 +75,8 @@ class GeminiImageModel(str, Enum):
     gemini_3_pro_image_preview = "google/gemini-3-pro-image-preview"
     gemini_3_pro_image_preview_stable = "google/gemini-3-pro-image-preview-stable"
     gemini_3_pro_image_preview_cheap = "google/gemini-3-pro-image-preview-cheap"
+    gemini_3_pro_image_preview_stable_legacy = "gemini-3-pro-image-preview-stable"
+    gemini_3_pro_image_preview_cheap_legacy = "gemini-3-pro-image-preview-cheap"
     batch_gemini_3_pro_image_preview = "batch/gemini-3-pro-image-preview"
     batch_gemini_3_pro_image_preview_stable = "batch/gemini-3-pro-image-preview-stable"
     batch_gemini_3_pro_image_preview_cheap = "batch/gemini-3-pro-image-preview-cheap"
