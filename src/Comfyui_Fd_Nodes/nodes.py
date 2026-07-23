@@ -35,6 +35,7 @@ from .utils.common_util import (
     bytesio_to_image_tensor,
     downscale_image_tensor,
 )
+from .utils.error_utils import ERROR_TIMEOUT, normalize_error_message
 from .utils.oss_client import upload_bytes_to_oss
 from .utils.webhook import webhook_send
 from .gpt_image_node import FD_GTPImage
@@ -712,8 +713,8 @@ class FD_SeedreamImage(ComfyNodeABC):
 
         logger.info(f"Calling Seedream API with {body}")
 
+        response = None
         try:
-            # Call API
             headers = {
                 "Authorization": f"Bearer {FD_LITELLM_API_KEY}",
                 "Content-Type": "application/json",
@@ -726,18 +727,32 @@ class FD_SeedreamImage(ComfyNodeABC):
                 timeout=300,
             )
             response.raise_for_status()
-
-            if response.status_code != 200:
-                raise Exception(f"Failed to call API: {response.content}")
-
             result = response.json()
             logger.info(f"Seedream API response: {result}")
-
-            # Get result image URL
             result_url = result["data"][0]["url"]
-        except Exception:
-            traceback.print_exc()
-            raise GenImageServiceError("TIMEOUT")
+            image_response = requests.get(result_url, timeout=300)
+            image_response.raise_for_status()
+        except requests.exceptions.Timeout as exc:
+            raise GenImageServiceError(
+                normalize_error_message(exc, category=ERROR_TIMEOUT, fallback_detail="request timed out")
+            ) from exc
+        except requests.exceptions.HTTPError as exc:
+            error_response = exc.response
+            status_code = error_response.status_code if error_response is not None else "unknown"
+            response_text = error_response.text if error_response is not None else str(exc)
+            raise GenImageServiceError(
+                normalize_error_message(f"HTTP {status_code} from Seedream: {response_text}")
+            ) from exc
+        except requests.exceptions.RequestException as exc:
+            raise GenImageServiceError(
+                normalize_error_message(f"REQUEST_ERROR: {exc}")
+            ) from exc
+        except Exception as exc:
+            response_text = response.text[:500] if response is not None else ""
+            detail = f"UNEXPECTED_ERROR: {exc}"
+            if response_text:
+                detail = f"{detail}; response: {response_text}"
+            raise GenImageServiceError(normalize_error_message(detail)) from exc
 
         if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
             try:
@@ -750,8 +765,7 @@ class FD_SeedreamImage(ComfyNodeABC):
                 })
             except Exception:
                 pass
-        image_content = requests.get(result_url).content
-        image_bytesio = BytesIO(image_content)
+        image_bytesio = BytesIO(image_response.content)
         output_image = bytesio_to_image_tensor(image_bytesio)
 
         return (output_image,)
