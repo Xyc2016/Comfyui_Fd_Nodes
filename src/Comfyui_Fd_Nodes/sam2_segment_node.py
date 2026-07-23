@@ -197,9 +197,6 @@ class ZhiYiSAM2SegmentNode:
         elif len(groups) != image_count:
             raise RuntimeError(f"BBOXES 数量({len(groups)})必须为 1 或等于图片数量({image_count})")
 
-        for idx, group in enumerate(groups):
-            if not group:
-                raise RuntimeError(f"第 {idx + 1} 张图片没有 bbox，SAM2 节点需要至少一个 bbox")
         return groups
 
     def _build_payload(self, image_data_url, bboxes, dilate, blur):
@@ -302,6 +299,29 @@ class ZhiYiSAM2SegmentNode:
         if data.get("status") != "ok" or data.get("loaded") is not True:
             raise RuntimeError(f"SAM2 服务未就绪: {json.dumps(data, ensure_ascii=False)[:1000]}")
 
+    def _empty_bbox_result(self, idx, image_tensor):
+        height, width = image_tensor.shape[-3:-1]
+        mask = torch.ones(
+            (1, height, width),
+            dtype=image_tensor.dtype,
+            device=image_tensor.device,
+        )
+        logger.warning(
+            "第 %s 张图片无 bbox，跳过 SAM2 API，原图直出且返回全白 mask",
+            idx + 1,
+        )
+        return {
+            "result_image": image_tensor,
+            "mask": mask,
+            "mask_image": self._mask_to_image_tensor(mask),
+            "info": {
+                "index": idx,
+                "bboxes": [],
+                "skipped": True,
+                "reason": "no_bbox",
+            },
+        }
+
     def _single_request(self, idx, image_tensor, bboxes, service_url, dilate, blur, background, background_color, invert_output, timeout):
         image_data_url = self._tensor_to_png_data_url(image_tensor)
         payload = self._build_payload(image_data_url, bboxes, dilate, blur)
@@ -377,27 +397,31 @@ class ZhiYiSAM2SegmentNode:
             raise RuntimeError("未提供图片")
 
         bbox_groups = self._normalize_bboxes_batch(bboxes, len(image_tensors))
-        if health_check:
+        if health_check and any(bbox_groups):
             self._check_health(service_url, timeout)
 
         tasks = []
         for idx, image_tensor in enumerate(image_tensors):
-            tasks.append((
-                idx,
-                self._single_request,
-                (
+            if bbox_groups[idx]:
+                task = (
                     idx,
-                    image_tensor,
-                    bbox_groups[idx],
-                    service_url,
-                    dilate,
-                    blur,
-                    background,
-                    background_color,
-                    invert_output,
-                    timeout,
-                ),
-            ))
+                    self._single_request,
+                    (
+                        idx,
+                        image_tensor,
+                        bbox_groups[idx],
+                        service_url,
+                        dilate,
+                        blur,
+                        background,
+                        background_color,
+                        invert_output,
+                        timeout,
+                    ),
+                )
+            else:
+                task = (idx, self._empty_bbox_result, (idx, image_tensor))
+            tasks.append(task)
 
         print(f"[知衣SAM2抠图] 处理 {len(tasks)} 张图片，并发上限 {max_concurrency}")
         results = self._run_concurrent(tasks, max_concurrency)

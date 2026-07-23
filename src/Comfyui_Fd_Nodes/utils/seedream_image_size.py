@@ -1,7 +1,17 @@
-SEEDREAM_IMAGE_SIZES = ["4K", "3K", "2K"]
+SEEDREAM_IMAGE_SIZES = ["4K", "3K", "2K", "1K"]
 SEEDREAM_ASPECT_RATIOS = ["1:1", "3:4", "4:3", "16:9", "9:16", "3:2", "2:3", "21:9"]
 
 SEEDREAM_SIZE_MAP = {
+    "1K": {
+        "1:1": "1024x1024",
+        "4:3": "1152x864",
+        "3:4": "864x1152",
+        "16:9": "1424x800",
+        "9:16": "800x1424",
+        "3:2": "1248x832",
+        "2:3": "832x1248",
+        "21:9": "1568x672",
+    },
     "2K": {
         "1:1": "2048x2048",
         "3:4": "1728x2304",
@@ -36,6 +46,7 @@ SEEDREAM_SIZE_MAP = {
 
 
 def resolution_to_seedream_size(resolution: str, aspect_ratio: str = "1:1") -> str:
-    normalized_resolution = resolution if resolution in SEEDREAM_SIZE_MAP else "2K"
-    normalized_aspect_ratio = aspect_ratio if aspect_ratio in SEEDREAM_SIZE_MAP[normalized_resolution] else "1:1"
-    return SEEDREAM_SIZE_MAP[normalized_resolution][normalized_aspect_ratio]
+    if resolution not in SEEDREAM_SIZE_MAP:
+        raise ValueError(f"Invalid Seedream resolution {resolution!r}; expected one of {SEEDREAM_IMAGE_SIZES}")
+    normalized_aspect_ratio = aspect_ratio if aspect_ratio in SEEDREAM_SIZE_MAP[resolution] else "1:1"
+    return SEEDREAM_SIZE_MAP[resolution][normalized_aspect_ratio]

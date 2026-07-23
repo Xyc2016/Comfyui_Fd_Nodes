@@ -10,7 +10,8 @@ def test_seedream_combo_node_metadata():
     input_types = FD_SeedreamImageComboNode.INPUT_TYPES()
 
     assert input_types["required"]["model"][0] == ["doubao-seedream-5.0-lite", "doubao-seedream-5.0-pro"]
-    assert input_types["required"]["size"][0] == ["4K", "3K", "2K"]
+    assert input_types["required"]["size"][0] == ["4K", "3K", "2K", "1K"]
+    assert input_types["required"]["size"][1]["default"] == "2K"
     assert input_types["required"]["output_format"][0] == ["png", "jpg"]
     assert "combo_1" in input_types["optional"]
     assert "combo_8" in input_types["optional"]
@@ -125,6 +126,24 @@ def test_seedream_combo_single_request_omits_sequential_image_generation_for_pro
     assert "sequential_image_generation" not in request_body
     assert "aspect_ratio" not in request_body
     assert "ratio" not in request_body
+
+
+@pytest.mark.parametrize(
+    ("model", "has_sequential_field"),
+    [
+        ("doubao-seedream-5.0-lite", True),
+        ("doubao-seedream-5.0-pro", False),
+    ],
+)
+def test_seedream_combo_builds_1k_payload_for_lite_and_pro(model, has_sequential_field):
+    node = FD_SeedreamImageComboNode()
+    image_urls = ["https://example.com/input-1.png", "https://example.com/input-2.png"]
+
+    body = node._build_body(model, "test prompt", image_urls, "1K", "png", "1:1")
+
+    assert body["size"] == "1024x1024"
+    assert body["image"] == image_urls
+    assert ("sequential_image_generation" in body) is has_sequential_field
 
 
 def test_seedream_combo_generate_reuses_uploaded_urls_and_keeps_combo_shape(monkeypatch):
