@@ -94,6 +94,17 @@ class ZhiYiImageToImageNode:
                     "default": "",
                     "multiline": True,
                 }),
+                "enable_color_bias_correction": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "仅直连 image-server /image/gemini_image 时启用全局偏红纠正",
+                }),
+                "color_bias_reference_image_index": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 5,
+                    "step": 1,
+                    "tooltip": "颜色参考图在最终 image_url_list 中的 0-based 索引",
+                }),
             },
         }
 
@@ -106,7 +117,8 @@ class ZhiYiImageToImageNode:
     def __init__(self):
         self.gemini_client = GeminiImageServiceClient()
 
-    def _single_request(self, image_url_list, prompt, model, aspect_ratio, image_size, seed, out_request_id="default"):
+    def _single_request(self, image_url_list, prompt, model, aspect_ratio, image_size, seed, out_request_id="default",
+                        enable_color_bias_correction=False, color_bias_reference_image_index=0):
         image, _result_url, _message = self.gemini_client.call_with_image_urls(
             prompt=prompt,
             model=model,
@@ -114,6 +126,8 @@ class ZhiYiImageToImageNode:
             aspect_ratio=aspect_ratio,
             image_size=image_size,
             out_request_id=out_request_id,
+            enable_color_bias_correction=enable_color_bias_correction,
+            color_bias_reference_image_index=color_bias_reference_image_index,
         )
         return image
 
@@ -156,7 +170,8 @@ class ZhiYiImageToImageNode:
                  batch_size=1, seed_mode="随机种子", seed=0,
                  node_switch=0, out_request_id="default", prompt_list=None,
                  image_2=None, image_3=None, image_4=None,
-                 image_5=None, image_6=None, system_prompt=""):
+                 image_5=None, image_6=None, system_prompt="",
+                 enable_color_bias_correction=False, color_bias_reference_image_index=0):
         if node_switch == 1:
             empty = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
             return (empty, 0)
@@ -195,7 +210,12 @@ class ZhiYiImageToImageNode:
                 if use_litellm:
                     tasks.append((task_idx, self._single_litellm_request, (messages, model, aspect_ratio or None, image_size, s, out_request_id)))
                 else:
-                    tasks.append((task_idx, self._single_request, (image_url_list, final_prompt, model, aspect_ratio or None, image_size, s, out_request_id)))
+                    request_args = (
+                        image_url_list, final_prompt, model, aspect_ratio or None, image_size, s, out_request_id,
+                    )
+                    if enable_color_bias_correction is True and "aistudio" not in model.lower():
+                        request_args += (True, color_bias_reference_image_index)
+                    tasks.append((task_idx, self._single_request, request_args))
                 task_idx += 1
 
         logger.info(

@@ -95,6 +95,17 @@ class ZhiYiImageToImageComboNode:
                     "default": "",
                     "multiline": True,
                 }),
+                "enable_color_bias_correction": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "仅直连 image-server /image/gemini_image 时启用全局偏红纠正",
+                }),
+                "color_bias_reference_image_index": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 63,
+                    "step": 1,
+                    "tooltip": "颜色参考图在每个组合最终 image_url_list 中的 0-based 索引",
+                }),
             },
         }
 
@@ -118,7 +129,8 @@ class ZhiYiImageToImageComboNode:
                 result.append(t)
         return result
 
-    def _single_request(self, image_url_list, prompt, model, aspect_ratio, image_size, seed, out_request_id=""):
+    def _single_request(self, image_url_list, prompt, model, aspect_ratio, image_size, seed, out_request_id="",
+                        enable_color_bias_correction=False, color_bias_reference_image_index=0):
         log_payload = {
             "url": self.gemini_client.service_url,
             "model": model,
@@ -142,6 +154,8 @@ class ZhiYiImageToImageComboNode:
             aspect_ratio=aspect_ratio,
             image_size=image_size,
             out_request_id=out_request_id,
+            enable_color_bias_correction=enable_color_bias_correction,
+            color_bias_reference_image_index=color_bias_reference_image_index,
         )
         return image
 
@@ -185,7 +199,8 @@ class ZhiYiImageToImageComboNode:
                  combo_1=None, combo_2=None, combo_3=None, combo_4=None,
                  combo_5=None, combo_6=None, combo_7=None, combo_8=None,
                  combo_9=None, combo_10=None,
-                 system_prompt=""):
+                 system_prompt="", enable_color_bias_correction=False,
+                 color_bias_reference_image_index=0):
         actual_seed = random.randint(0, 2147483647) if seed_mode == "随机种子" else seed
         use_litellm = should_use_litellm_gemini(model)
 
@@ -222,7 +237,12 @@ class ZhiYiImageToImageComboNode:
                         if use_litellm:
                             tasks.append((task_idx, self._single_litellm_request, (messages, model, aspect_ratio or None, image_size, s, out_request_id)))
                         else:
-                            tasks.append((task_idx, self._single_request, (image_url_list, final_prompt, model, aspect_ratio or None, image_size, s, out_request_id)))
+                            request_args = (
+                                image_url_list, final_prompt, model, aspect_ratio or None, image_size, s, out_request_id,
+                            )
+                            if enable_color_bias_correction is True and "aistudio" not in model.lower():
+                                request_args += (True, color_bias_reference_image_index)
+                            tasks.append((task_idx, self._single_request, request_args))
                         task_idx += 1
             except Exception as e:
                 normalized_error = normalize_error_message(e)

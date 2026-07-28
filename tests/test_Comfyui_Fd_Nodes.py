@@ -2,6 +2,7 @@
 
 """Tests for `Comfyui_Fd_Nodes` package."""
 
+import inspect
 import io
 import json
 import logging
@@ -416,6 +417,36 @@ def test_zhiyi_image_to_image_exposes_out_request_id():
     assert optional_inputs["out_request_id"][1]["default"] == "default"
 
 
+def test_gemini_image_nodes_append_color_bias_inputs():
+    for node_cls in (ZhiYiImageToImageNode, ZhiYiImageToImageComboNode, FD_GeminiImage):
+        optional_inputs = node_cls.INPUT_TYPES()["optional"]
+        assert list(optional_inputs)[-2:] == [
+            "enable_color_bias_correction",
+            "color_bias_reference_image_index",
+        ]
+        assert optional_inputs["enable_color_bias_correction"][1]["default"] is False
+        assert optional_inputs["color_bias_reference_image_index"][1]["default"] == 0
+
+    signatures = [
+        inspect.signature(FD_GeminiImage.api_call),
+        inspect.signature(ZhiYiImageToImageNode.generate),
+        inspect.signature(ZhiYiImageToImageComboNode.generate),
+    ]
+    for signature in signatures:
+        parameters = [
+            parameter
+            for parameter in signature.parameters.values()
+            if parameter.name != "self"
+            and parameter.kind is not inspect.Parameter.VAR_KEYWORD
+        ]
+        assert [parameter.name for parameter in parameters[-2:]] == [
+            "enable_color_bias_correction",
+            "color_bias_reference_image_index",
+        ]
+        assert signature.parameters["enable_color_bias_correction"].default is False
+        assert signature.parameters["color_bias_reference_image_index"].default == 0
+
+
 def test_zhiyi_image_to_image_nodes_expose_legacy_and_channel_models():
     expected_models = {
         "google/gemini-2.5-flash-image-preview",
@@ -456,6 +487,43 @@ def test_zhiyi_image_to_image_nodes_expose_legacy_and_channel_models():
     assert FD_GeminiImage.INPUT_TYPES()["required"]["model"][1]["default"] == GeminiImageModel.gemini_2_5_flash_image_preview
 
 
+def test_fd_gemini_image_sends_color_bias_fields_as_json_types(monkeypatch):
+    node = FD_GeminiImage()
+    requests_bodies = []
+
+    def fake_post(_url, json):
+        requests_bodies.append(json)
+        raise RuntimeError("stop after request capture")
+
+    monkeypatch.setattr("src.Comfyui_Fd_Nodes.old_gemini_api_node.requests.post", fake_post)
+
+    with pytest.raises(RuntimeError, match="stop after request capture"):
+        node.api_call(
+            out_request_id="req-color",
+            prompt="generate",
+            model="google/gemini-3-pro-image-preview",
+            resolution="2K",
+            enable_color_bias_correction=True,
+            color_bias_reference_image_index=2,
+        )
+
+    assert requests_bodies[0]["enable_color_bias_correction"] is True
+    assert requests_bodies[0]["color_bias_reference_image_index"] == 2
+
+    with pytest.raises(RuntimeError, match="stop after request capture"):
+        node.api_call(
+            out_request_id="req-disabled",
+            prompt="generate",
+            model="google/gemini-3-pro-image-preview",
+            resolution="2K",
+            enable_color_bias_correction="true",
+            color_bias_reference_image_index=2,
+        )
+
+    assert "enable_color_bias_correction" not in requests_bodies[1]
+    assert "color_bias_reference_image_index" not in requests_bodies[1]
+
+
 def test_gemini_service_builds_internal_request_body():
     client = GeminiImageServiceClient(service_url="https://gemini.internal")
 
@@ -477,6 +545,47 @@ def test_gemini_service_builds_internal_request_body():
         "resolution": "4K",
     }
     assert client.summarize_request_body(body)["image_count"] == 1
+
+    enabled_body = client.build_request_body(
+        prompt="draw product",
+        model="gemini-3-pro-image-preview",
+        image_url_list=["https://oss/model.png", "https://oss/clothes.png"],
+        enable_color_bias_correction=True,
+        color_bias_reference_image_index=1,
+    )
+    assert enabled_body["enable_color_bias_correction"] is True
+    assert enabled_body["color_bias_reference_image_index"] == 1
+    assert isinstance(enabled_body["enable_color_bias_correction"], bool)
+
+    for disabled_value in (False, "true", 1, None):
+        disabled_body = client.build_request_body(
+            prompt="draw product",
+            model="gemini-3-pro-image-preview",
+            image_url_list=["https://oss/input.png"],
+            enable_color_bias_correction=disabled_value,
+            color_bias_reference_image_index=2,
+        )
+        assert "enable_color_bias_correction" not in disabled_body
+        assert "color_bias_reference_image_index" not in disabled_body
+
+    for invalid_index in (True, "2", 1.5, None):
+        normalized_body = client.build_request_body(
+            prompt="draw product",
+            model="gemini-3-pro-image-preview",
+            image_url_list=["https://oss/input.png"],
+            enable_color_bias_correction=True,
+            color_bias_reference_image_index=invalid_index,
+        )
+        assert normalized_body["color_bias_reference_image_index"] == 0
+
+    negative_index_body = client.build_request_body(
+        prompt="draw product",
+        model="gemini-3-pro-image-preview",
+        image_url_list=["https://oss/input.png"],
+        enable_color_bias_correction=True,
+        color_bias_reference_image_index=-3,
+    )
+    assert negative_index_body["color_bias_reference_image_index"] == -3
 
     old_batch_body = client.build_request_body(
         prompt="draw product",
@@ -565,6 +674,8 @@ def test_zhiyi_image_to_image_uses_internal_gemini_service(monkeypatch):
         seed=42,
         out_request_id="req-123",
         system_prompt="system prompt",
+        enable_color_bias_correction=True,
+        color_bias_reference_image_index=1,
     )
 
     assert result.shape == (1, 2, 2, 3)
@@ -577,6 +688,8 @@ def test_zhiyi_image_to_image_uses_internal_gemini_service(monkeypatch):
     assert request["aspect_ratio"] == "1:1"
     assert request["image_size"] == "4K"
     assert request["out_request_id"] == "req-123"
+    assert request["enable_color_bias_correction"] is True
+    assert request["color_bias_reference_image_index"] == 1
 
 
 def test_zhiyi_image_to_image_aistudio_uses_internal_official_model(monkeypatch):
@@ -606,6 +719,8 @@ def test_zhiyi_image_to_image_aistudio_uses_internal_official_model(monkeypatch)
         seed=42,
         out_request_id="req-123",
         system_prompt="system prompt",
+        enable_color_bias_correction=True,
+        color_bias_reference_image_index=1,
     )
 
     assert result.shape == (1, 2, 2, 3)
@@ -615,6 +730,8 @@ def test_zhiyi_image_to_image_aistudio_uses_internal_official_model(monkeypatch)
     assert request["image_url_list"] == ["https://oss/input.png"]
     assert request["prompt"] == "system prompt\n\nuser prompt"
     assert request["model"] == "gemini-3-pro-image-preview-aistudio"
+    assert request["enable_color_bias_correction"] is False
+    assert request["color_bias_reference_image_index"] == 0
     assert normalize_gemini_model_name(request["model"]) == "google/gemini-3-pro-image-preview-official"
 
 
@@ -756,6 +873,8 @@ def test_zhiyi_image_to_image_combo_uses_internal_gemini_service(monkeypatch):
         out_request_id="req-456",
         combo_1=combo,
         system_prompt="system prompt",
+        enable_color_bias_correction=True,
+        color_bias_reference_image_index=1,
     )
 
     assert len(images) == 2
@@ -769,6 +888,8 @@ def test_zhiyi_image_to_image_combo_uses_internal_gemini_service(monkeypatch):
         "4K",
         7,
         "req-456",
+        True,
+        1,
     )
     assert calls[1][1] == "system prompt\n\nprompt two"
 
@@ -802,6 +923,8 @@ def test_zhiyi_image_to_image_combo_aistudio_uses_internal_official_model(monkey
         out_request_id="req-456",
         combo_1=combo,
         system_prompt="system prompt",
+        enable_color_bias_correction=True,
+        color_bias_reference_image_index=1,
     )
 
     assert len(images) == 1
@@ -856,6 +979,8 @@ def test_zhiyi_image_to_image_combo_siphonlab_uses_litellm_without_model_rename(
         out_request_id="req-456",
         combo_1=combo,
         system_prompt="system prompt",
+        enable_color_bias_correction=True,
+        color_bias_reference_image_index=1,
     )
 
     assert len(images) == 1

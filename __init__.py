@@ -3,8 +3,10 @@
 __all__ = [
     "NODE_CLASS_MAPPINGS",
     "NODE_DISPLAY_NAME_MAPPINGS",
-
+    "WEB_DIRECTORY",
 ]
+
+WEB_DIRECTORY = "./src/Comfyui_Fd_Nodes/other"
 
 __author__ = """xuyucai"""
 __email__ = "986327386@qq.com"

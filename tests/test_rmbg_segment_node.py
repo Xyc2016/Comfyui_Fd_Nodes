@@ -101,6 +101,25 @@ def test_rmbg_and_segment_node_metadata():
     assert clothes_inputs["required"]["service_url"][1]["default"].endswith("/v1/segment/clothes")
     assert fashion_inputs["required"]["service_url"][1]["default"].endswith("/v1/segment/fashion")
     assert body_inputs["required"]["service_url"][1]["default"].endswith("/v1/segment/body")
+    assert list(body_inputs["required"]) == [
+        "image",
+        "service_url",
+        "classes",
+        "process_res",
+        "mask_blur",
+        "mask_offset",
+        "invert_output",
+        "background",
+        "background_color",
+        "return_image",
+        "return_mask",
+        "return_mask_image",
+        "max_concurrency",
+        "timeout",
+    ]
+    assert list(body_inputs["optional"]) == ["health_check", "node_switch", "service_url_preset"]
+    assert body_inputs["required"]["service_url"][0] == "STRING"
+    assert body_inputs["required"]["classes"][0] == "STRING"
     assert "忽略 process_res" in body_inputs["required"]["process_res"][1]["tooltip"]
 
     assert len(CLOTHES_CLASSES) == 18
@@ -214,6 +233,16 @@ def test_parse_classes_preserves_fashion_comma_names():
         "bag, wallet",
     ]
     assert body._parse_classes_text("", BODY_CLASSES, allow_comma_split=True) == []
+    assert body._parse_classes_text(
+        '["Face", "Torso-skin"]', BODY_CLASSES, allow_comma_split=True
+    ) == ["Face", "Torso-skin"]
+    assert body._parse_classes_text(
+        "Face\nHair\nTop-clothes", BODY_CLASSES, allow_comma_split=True
+    ) == ["Face", "Hair", "Top-clothes"]
+    assert body._parse_classes_text(
+        "Face, Hair, Bottom-clothes", BODY_CLASSES, allow_comma_split=True
+    ) == ["Face", "Hair", "Bottom-clothes"]
+    assert body._parse_classes_text(["Face", "Hair"], BODY_CLASSES, allow_comma_split=True) == ["Face", "Hair"]
 
     with pytest.raises(RuntimeError, match="不支持的分割类别"):
         fashion._parse_classes_text("shirt, blouse, pants", FASHION_CLASSES, allow_comma_split=False)

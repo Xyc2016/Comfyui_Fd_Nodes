@@ -117,6 +117,8 @@ class GeminiImageServiceClient:
         aspect_ratio: Optional[str] = None,
         image_size: Optional[str] = None,
         out_request_id: str = "",
+        enable_color_bias_correction: bool = False,
+        color_bias_reference_image_index: int = 0,
     ) -> dict:
         body = {
             "out_request_id": out_request_id or "default",
@@ -127,6 +129,14 @@ class GeminiImageServiceClient:
         }
         if image_size:
             body["resolution"] = image_size
+        if enable_color_bias_correction is True:
+            body["enable_color_bias_correction"] = True
+            body["color_bias_reference_image_index"] = (
+                color_bias_reference_image_index
+                if isinstance(color_bias_reference_image_index, int)
+                and not isinstance(color_bias_reference_image_index, bool)
+                else 0
+            )
         return body
 
     def summarize_request_body(self, body: dict) -> dict:
@@ -150,6 +160,8 @@ class GeminiImageServiceClient:
         aspect_ratio: Optional[str] = None,
         image_size: Optional[str] = None,
         out_request_id: str = "",
+        enable_color_bias_correction: bool = False,
+        color_bias_reference_image_index: int = 0,
     ):
         if not self.service_url:
             raise RuntimeError("未配置 Gemini 服务地址，请设置环境变量 FD_GEMINI_URL")
@@ -165,6 +177,8 @@ class GeminiImageServiceClient:
             aspect_ratio=aspect_ratio,
             image_size=image_size,
             out_request_id=out_request_id,
+            enable_color_bias_correction=enable_color_bias_correction,
+            color_bias_reference_image_index=color_bias_reference_image_index,
         )
         logger.info("Calling Gemini image service with payload=%s", self.summarize_request_body(body))
 
@@ -218,6 +232,8 @@ class GeminiImageServiceClient:
         aspect_ratio: Optional[str] = None,
         image_size: Optional[str] = None,
         out_request_id: str = "",
+        enable_color_bias_correction: bool = False,
+        color_bias_reference_image_index: int = 0,
     ):
         image_url_list = self.upload_images(image_tensors)
         return self.call_with_image_urls(
@@ -227,4 +243,6 @@ class GeminiImageServiceClient:
             aspect_ratio=aspect_ratio,
             image_size=image_size,
             out_request_id=out_request_id,
+            enable_color_bias_correction=enable_color_bias_correction,
+            color_bias_reference_image_index=color_bias_reference_image_index,
         )

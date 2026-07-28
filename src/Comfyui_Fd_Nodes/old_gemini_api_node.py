@@ -174,6 +174,23 @@ class FD_GeminiImage(ComfyNodeABC):
                         "tooltip": "Optional aspect ratio for the generated image",
                     }
                 ),
+                "enable_color_bias_correction": (
+                    IO.BOOLEAN,
+                    {
+                        "default": False,
+                        "tooltip": "启用 image-server 全局偏红纠正",
+                    },
+                ),
+                "color_bias_reference_image_index": (
+                    IO.INT,
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": 63,
+                        "step": 1,
+                        "tooltip": "颜色参考图在 image_url_list 中的 0-based 索引",
+                    },
+                ),
                 # TODO: later we can add this parameter later
                 # "n": (
                 #     IO.INT,
@@ -211,6 +228,8 @@ class FD_GeminiImage(ComfyNodeABC):
         files: Optional[list[GeminiPart]] = None,
         n=1,
         unique_id: Optional[str] = None,
+        enable_color_bias_correction: bool = False,
+        color_bias_reference_image_index: int = 0,
         **kwargs,
     ):
         body = {
@@ -227,6 +246,14 @@ class FD_GeminiImage(ComfyNodeABC):
 
         if resolution:
             body["resolution"] = resolution
+        if enable_color_bias_correction is True:
+            body["enable_color_bias_correction"] = True
+            body["color_bias_reference_image_index"] = (
+                color_bias_reference_image_index
+                if isinstance(color_bias_reference_image_index, int)
+                and not isinstance(color_bias_reference_image_index, bool)
+                else 0
+            )
         if images is not None:
             batch_size = images.shape[0]
             image_url_list = []
