@@ -141,6 +141,24 @@ class ZhiYiImageToImageComboNode:
                 result.append(t)
         return result
 
+    @staticmethod
+    def _resolve_batch_ids(model, out_request_id, batch_task_id, batch_item_id):
+        if not is_batch_gemini_model(model):
+            return batch_task_id, batch_item_id
+
+        has_batch_task_id = isinstance(batch_task_id, str) and bool(batch_task_id.strip())
+        has_out_request_id = isinstance(out_request_id, str) and bool(out_request_id.strip())
+        if not has_batch_task_id and not has_out_request_id:
+            raise RuntimeError(
+                "Batch Gemini 提交阶段缺少有效的 batch_task_id 或 out_request_id，"
+                "请提供至少一个非空字段：batch_task_id、out_request_id"
+            )
+
+        effective_batch_task_id = batch_task_id if has_batch_task_id else out_request_id
+        has_batch_item_id = isinstance(batch_item_id, str) and bool(batch_item_id.strip())
+        effective_batch_item_id = batch_item_id if has_batch_item_id else effective_batch_task_id
+        return effective_batch_task_id, effective_batch_item_id
+
     def _single_request(self, image_url_list, prompt, model, aspect_ratio, image_size, seed, out_request_id="",
                         enable_color_bias_correction=False, color_bias_reference_image_index=0,
                         batch_task_id="", batch_item_id=""):
@@ -218,7 +236,10 @@ class ZhiYiImageToImageComboNode:
                  color_bias_reference_image_index=0,
                  batch_task_id="", batch_item_id=""):
         actual_seed = random.randint(0, 2147483647) if seed_mode == "随机种子" else seed
-        validate_gemini_batch_ids(model, batch_task_id, batch_item_id)
+        effective_batch_task_id, effective_batch_item_id = self._resolve_batch_ids(
+            model, out_request_id, batch_task_id, batch_item_id
+        )
+        validate_gemini_batch_ids(model, effective_batch_task_id, effective_batch_item_id)
         use_litellm = should_use_litellm_gemini(model)
 
         combos = [c for c in [combo_1, combo_2, combo_3, combo_4, combo_5, combo_6, combo_7, combo_8, combo_9, combo_10] if c is not None]
@@ -268,8 +289,8 @@ class ZhiYiImageToImageComboNode:
                                     if enable_color_bias_correction is True
                                     else 0
                                 ),
-                                batch_task_id,
-                                batch_item_id,
+                                effective_batch_task_id,
+                                effective_batch_item_id,
                             )
                             tasks.append((task_idx, self._single_request, request_args))
                         task_idx += 1
@@ -288,7 +309,7 @@ class ZhiYiImageToImageComboNode:
 
         if is_batch_gemini_model(model) and len(tasks) > 1:
             tasks = [
-                (idx, fn, args[:-1] + (f"{batch_item_id}-{idx}",))
+                (idx, fn, args[:-1] + (f"{effective_batch_item_id}-{idx}",))
                 for idx, fn, args in tasks
             ]
 

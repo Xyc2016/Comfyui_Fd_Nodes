@@ -1138,7 +1138,210 @@ def test_zhiyi_image_to_image_combo_uses_internal_gemini_service(monkeypatch):
     assert calls[1][1] == "system prompt\n\nprompt two"
 
 
-def test_zhiyi_image_to_image_combo_derives_contiguous_batch_item_ids_after_skips(monkeypatch):
+
+
+def test_zhiyi_image_to_image_combo_batch_ids_prefer_explicit_values(monkeypatch):
+    node = ZhiYiImageToImageComboNode()
+    calls = []
+    combo = {
+        "images": [torch.zeros((1, 2, 2, 3))],
+        "prompts": ["prompt"],
+    }
+
+    monkeypatch.setattr(node.gemini_client, "upload_images", lambda _images: ["https://oss/input.png"])
+    monkeypatch.setattr(
+        node,
+        "_single_request",
+        lambda *args: calls.append(args) or torch.ones((1, 2, 2, 3)),
+    )
+
+    node.generate(
+        model="batch/gemini-3-pro-image-preview-vip",
+        aspect_ratio="1:1",
+        image_size="4K",
+        batch_size=1,
+        max_concurrency=1,
+        seed_mode="固定种子",
+        seed=7,
+        out_request_id="legacy-request",
+        combo_1=combo,
+        batch_task_id=" explicit-task ",
+        batch_item_id=" explicit-item ",
+    )
+
+    assert calls[0][-2:] == (" explicit-task ", " explicit-item ")
+
+
+def test_zhiyi_image_to_image_combo_batch_ids_fall_back_to_out_request_id(monkeypatch):
+    node = ZhiYiImageToImageComboNode()
+    calls = []
+    combo = {
+        "images": [torch.zeros((1, 2, 2, 3))],
+        "prompts": ["prompt"],
+    }
+
+    monkeypatch.setattr(node.gemini_client, "upload_images", lambda _images: ["https://oss/input.png"])
+    monkeypatch.setattr(
+        node,
+        "_single_request",
+        lambda *args: calls.append(args) or torch.ones((1, 2, 2, 3)),
+    )
+
+    node.generate(
+        model="batch/gemini-3-pro-image-preview-vip",
+        aspect_ratio="1:1",
+        image_size="4K",
+        batch_size=1,
+        max_concurrency=1,
+        seed_mode="固定种子",
+        seed=7,
+        out_request_id="legacy-request",
+        combo_1=combo,
+    )
+
+    assert calls[0][-2:] == ("legacy-request", "legacy-request")
+
+
+def test_zhiyi_image_to_image_combo_batch_item_fallback_uses_effective_task_id(monkeypatch):
+    node = ZhiYiImageToImageComboNode()
+    calls = []
+    combo = {
+        "images": [torch.zeros((1, 2, 2, 3))],
+        "prompts": ["prompt one", "prompt two"],
+    }
+
+    monkeypatch.setattr(node.gemini_client, "upload_images", lambda _images: ["https://oss/input.png"])
+    monkeypatch.setattr(
+        node,
+        "_single_request",
+        lambda *args: calls.append(args) or torch.ones((1, 2, 2, 3)),
+    )
+
+    node.generate(
+        model="batch/gemini-3-pro-image-preview-vip",
+        aspect_ratio="1:1",
+        image_size="4K",
+        batch_size=1,
+        max_concurrency=1,
+        seed_mode="固定种子",
+        seed=7,
+        out_request_id="legacy-request",
+        combo_1=combo,
+    )
+    assert [args[-2:] for args in calls] == [
+        ("legacy-request", "legacy-request-0"),
+        ("legacy-request", "legacy-request-1"),
+    ]
+
+    calls.clear()
+    node.generate(
+        model="batch/gemini-3-pro-image-preview-vip",
+        aspect_ratio="1:1",
+        image_size="4K",
+        batch_size=1,
+        max_concurrency=1,
+        seed_mode="固定种子",
+        seed=7,
+        out_request_id="legacy-request",
+        combo_1={"images": [torch.zeros((1, 2, 2, 3))], "prompts": ["prompt one", "prompt two"]},
+        batch_task_id="explicit-task",
+    )
+    assert [args[-2:] for args in calls] == [
+        ("explicit-task", "explicit-task-0"),
+        ("explicit-task", "explicit-task-1"),
+    ]
+
+
+def test_zhiyi_image_to_image_combo_batch_sync_response_does_not_reuse_server_task_id(monkeypatch):
+    node = ZhiYiImageToImageComboNode()
+    node.gemini_client.service_url = "https://gemini.internal/generate"
+    combo = {
+        "images": [torch.zeros((1, 2, 2, 3))],
+        "prompts": ["prompt"],
+    }
+    posts = []
+    gets = []
+    image_buffer = io.BytesIO()
+    Image.new("RGB", (2, 2), color="white").save(image_buffer, format="PNG")
+
+    class FakeResponse:
+        ok = True
+        status_code = 200
+        text = "{}"
+        content = image_buffer.getvalue()
+
+        def json(self):
+            return {
+                "result_image_url": "https://oss/result.png",
+                "task_id": "server-diagnostic-task",
+            }
+
+        def raise_for_status(self):
+            return None
+
+    def fake_post(_url, json, timeout):
+        posts.append((json, timeout))
+        return FakeResponse()
+
+    def fake_get(url, timeout):
+        gets.append((url, timeout))
+        return FakeResponse()
+
+    monkeypatch.setattr("src.Comfyui_Fd_Nodes.utils.gemini_service.requests.post", fake_post)
+    monkeypatch.setattr("src.Comfyui_Fd_Nodes.utils.gemini_service.requests.get", fake_get)
+    monkeypatch.setattr(node.gemini_client, "upload_images", lambda _images: ["https://oss/input.png"])
+
+    images, _seed, _log = node.generate(
+        model="batch/gemini-3-pro-image-preview-vip",
+        aspect_ratio="1:1",
+        image_size="4K",
+        batch_size=1,
+        max_concurrency=1,
+        seed_mode="固定种子",
+        seed=7,
+        out_request_id="legacy-request",
+        combo_1=combo,
+        batch_task_id="client-task",
+        batch_item_id="client-item",
+    )
+
+    assert len(images) == 1
+    assert len(posts) == 1
+    assert posts[0][0]["batch_task_id"] == "client-task"
+    assert posts[0][0]["batch_item_id"] == "client-item"
+    assert "server-diagnostic-task" not in posts[0][0].values()
+    assert gets == [("https://oss/result.png", 300)]
+
+
+def test_zhiyi_image_to_image_combo_non_batch_does_not_derive_batch_ids(monkeypatch):
+    node = ZhiYiImageToImageComboNode()
+    calls = []
+    combo = {
+        "images": [torch.zeros((1, 2, 2, 3))],
+        "prompts": ["prompt"],
+    }
+
+    monkeypatch.setattr(node.gemini_client, "upload_images", lambda _images: ["https://oss/input.png"])
+    monkeypatch.setattr(
+        node,
+        "_single_request",
+        lambda *args: calls.append(args) or torch.ones((1, 2, 2, 3)),
+    )
+
+    node.generate(
+        model="gemini-3-pro-image-preview-vip",
+        aspect_ratio="1:1",
+        image_size="4K",
+        batch_size=1,
+        max_concurrency=1,
+        seed_mode="固定种子",
+        seed=7,
+        out_request_id="legacy-request",
+        combo_1=combo,
+    )
+
+    assert calls[0][-2:] == ("", "")
+
     node = ZhiYiImageToImageComboNode()
     valid_combo = {
         "images": [torch.zeros((1, 2, 2, 3))],
@@ -1173,15 +1376,23 @@ def test_zhiyi_image_to_image_combo_derives_contiguous_batch_item_ids_after_skip
     assert [args[1] for args in calls] == ["prompt one", "prompt two"]
 
 
-def test_zhiyi_image_to_image_combo_batch_validation_precedes_preprocessing():
+def test_zhiyi_image_to_image_combo_batch_validation_precedes_preprocessing(monkeypatch):
     node = ZhiYiImageToImageComboNode()
     node.gemini_client.upload_images = lambda _images: pytest.fail("must validate before upload")
+    monkeypatch.setattr(
+        "src.Comfyui_Fd_Nodes.utils.gemini_service.requests.post",
+        lambda *_args, **_kwargs: pytest.fail("must validate before HTTP"),
+    )
 
-    with pytest.raises(RuntimeError, match="batch_task_id"):
+    with pytest.raises(
+        RuntimeError,
+        match=r"提交阶段.*batch_task_id.*out_request_id",
+    ):
         node.generate(
             model="batch/gemini-3-pro-image-preview-vip",
             aspect_ratio="1:1",
             image_size="4K",
+            out_request_id=" ",
             combo_1={"images": [torch.zeros((1, 2, 2, 3))], "prompts": ["prompt"]},
             batch_task_id="",
             batch_item_id="item",
