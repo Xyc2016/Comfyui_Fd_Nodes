@@ -22,6 +22,7 @@ MODEL_NAME_MAP = {
     "gemini-2.5-flash-image-preview": "google/gemini-2.5-flash-image-preview",
     "gemini-3-pro-image-preview": "google/gemini-3-pro-image-preview",
     "gemini-3-pro-image-preview-vip": "google/gemini-3-pro-image-preview-vip",
+    "gemini-3-pro-image-preview-adobe": "gemini-3-pro-image-preview-adobe",
     "batch/gemini-3-pro-image-preview": "batch/gemini-3-pro-image-preview",
     "gemini-3-pro-image-preview-aistudio": "google/gemini-3-pro-image-preview-official",
     "gemini-3-pro-image-preview-official": "google/gemini-3-pro-image-preview-official",

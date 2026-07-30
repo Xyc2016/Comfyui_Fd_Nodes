@@ -90,6 +90,7 @@ class GeminiImageModel(str, Enum):
     gemini_3_pro_image_preview_vip_legacy = "gemini-3-pro-image-preview-vip"
     gemini_3_pro_image_preview_vip = "google/gemini-3-pro-image-preview-vip"
     batch_gemini_3_pro_image_preview_vip = "batch/gemini-3-pro-image-preview-vip"
+    gemini_3_pro_image_preview_adobe = "gemini-3-pro-image-preview-adobe"
 
 
 def fd_gemini_send_webhook(gemini_req_body: dict):

@@ -474,6 +474,7 @@ def test_zhiyi_image_to_image_nodes_expose_legacy_and_channel_models():
         "gemini-3-pro-image-preview-vip",
         "google/gemini-3-pro-image-preview-vip",
         "batch/gemini-3-pro-image-preview-vip",
+        "gemini-3-pro-image-preview-adobe",
     }
 
     assert expected_models.issubset(set(ZhiYiImageToImageNode.MODELS))
@@ -497,6 +498,9 @@ def test_zhiyi_image_to_image_nodes_expose_legacy_and_channel_models():
         "batch/gemini-3-pro-image-preview-vip",
     }
     assert vip_models.issubset(set(fd_models))
+    assert fd_models.count("gemini-3-pro-image-preview-adobe") == 1
+    assert ZhiYiImageToImageNode.MODELS.count("gemini-3-pro-image-preview-adobe") == 1
+    assert ZhiYiImageToImageComboNode.MODELS.count("gemini-3-pro-image-preview-adobe") == 1
     for model in new_models:
         assert fd_models.count(model) == 1
     assert ZhiYiImageToImageNode.INPUT_TYPES()["required"]["model"][1]["default"] == "google/gemini-3-pro-image-preview"
@@ -779,6 +783,23 @@ def test_gemini_client_batch_validation_precedes_upload_and_http(monkeypatch):
     assert posts == []
 
 
+def test_gemini_adobe_request_body_preserves_model_and_color_bias():
+    client = GeminiImageServiceClient(service_url="https://gemini.internal")
+    body = client.build_request_body(
+        prompt="draw product",
+        model="gemini-3-pro-image-preview-adobe",
+        image_url_list=["https://oss/input.png"],
+        enable_color_bias_correction=True,
+        color_bias_reference_image_index=2,
+    )
+
+    assert body["model"] == "gemini-3-pro-image-preview-adobe"
+    assert body["enable_color_bias_correction"] is True
+    assert body["color_bias_reference_image_index"] == 2
+    assert "batch_task_id" not in body
+    assert "batch_item_id" not in body
+
+
 def test_gemini_service_model_and_prompt_helpers():
     assert normalize_gemini_model_name("gemini-2.5-flash-image-preview") == "google/gemini-2.5-flash-image-preview"
     assert normalize_gemini_model_name("google/gemini-3-pro-image-preview") == "google/gemini-3-pro-image-preview"
@@ -786,6 +807,7 @@ def test_gemini_service_model_and_prompt_helpers():
     assert normalize_gemini_model_name("gemini-3-pro-image-preview-vip") == "google/gemini-3-pro-image-preview-vip"
     assert normalize_gemini_model_name("google/gemini-3-pro-image-preview-vip") == "google/gemini-3-pro-image-preview-vip"
     assert normalize_gemini_model_name("batch/gemini-3-pro-image-preview-vip") == "batch/gemini-3-pro-image-preview-vip"
+    assert normalize_gemini_model_name("gemini-3-pro-image-preview-adobe") == "gemini-3-pro-image-preview-adobe"
     assert normalize_gemini_model_name("gemini-3-pro-image-preview-official") == "google/gemini-3-pro-image-preview-official"
     assert normalize_gemini_model_name("google/gemini-3-pro-image-preview-official") == "google/gemini-3-pro-image-preview-official"
     assert normalize_gemini_model_name("gemini-3-pro-image-preview-aistudio") == "google/gemini-3-pro-image-preview-official"
@@ -794,6 +816,7 @@ def test_gemini_service_model_and_prompt_helpers():
     assert should_use_litellm_gemini("gemini-3-pro-image-preview-vip") is False
     assert should_use_litellm_gemini("google/gemini-3-pro-image-preview-vip") is False
     assert should_use_litellm_gemini("batch/gemini-3-pro-image-preview-vip") is False
+    assert should_use_litellm_gemini("gemini-3-pro-image-preview-adobe") is False
     assert should_use_litellm_gemini("gemini-3-pro-image-preview-siphonlab") is True
     assert should_use_litellm_gemini("gemini-3.1-flash-image-preview") is False
     assert should_use_litellm_gemini("gemini-3-pro-image-preview") is False

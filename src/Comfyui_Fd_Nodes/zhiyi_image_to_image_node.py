@@ -48,6 +48,7 @@ class ZhiYiImageToImageNode:
         "gemini-3-pro-image-preview-vip",
         "google/gemini-3-pro-image-preview-vip",
         "batch/gemini-3-pro-image-preview-vip",
+        "gemini-3-pro-image-preview-adobe",
     ]
 
     ASPECT_RATIOS = ["", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9"]
