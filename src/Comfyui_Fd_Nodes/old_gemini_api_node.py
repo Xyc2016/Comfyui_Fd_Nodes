@@ -22,6 +22,11 @@ from .utils.common_util import (
     downscale_image_tensor,
 )
 from .utils.error_utils import normalize_error_message
+from .utils.gemini_service import (
+    is_batch_gemini_model,
+    normalize_gemini_model_name,
+    validate_gemini_batch_ids,
+)
 from .utils.logging_utils import configure_default_logging
 from .utils.oss_client import upload_bytes_to_oss
 from .utils.webhook import webhook_send
@@ -82,6 +87,9 @@ class GeminiImageModel(str, Enum):
     batch_gemini_3_pro_image_preview_cheap = "batch/gemini-3-pro-image-preview-cheap"
     gemini_3_pro_image_preview_official = "google/gemini-3-pro-image-preview-official"
     gemini_3_1_flash_image_preview = "google/gemini-3.1-flash-image-preview"
+    gemini_3_pro_image_preview_vip_legacy = "gemini-3-pro-image-preview-vip"
+    gemini_3_pro_image_preview_vip = "google/gemini-3-pro-image-preview-vip"
+    batch_gemini_3_pro_image_preview_vip = "batch/gemini-3-pro-image-preview-vip"
 
 
 def fd_gemini_send_webhook(gemini_req_body: dict):
@@ -191,6 +199,8 @@ class FD_GeminiImage(ComfyNodeABC):
                         "tooltip": "颜色参考图在 image_url_list 中的 0-based 索引",
                     },
                 ),
+                "batch_task_id": (IO.STRING, {"default": ""}),
+                "batch_item_id": (IO.STRING, {"default": ""}),
                 # TODO: later we can add this parameter later
                 # "n": (
                 #     IO.INT,
@@ -230,12 +240,16 @@ class FD_GeminiImage(ComfyNodeABC):
         unique_id: Optional[str] = None,
         enable_color_bias_correction: bool = False,
         color_bias_reference_image_index: int = 0,
+        batch_task_id: str = "",
+        batch_item_id: str = "",
         **kwargs,
     ):
+        validate_gemini_batch_ids(model, batch_task_id, batch_item_id)
+        normalized_model = normalize_gemini_model_name(model)
         body = {
             "out_request_id": out_request_id,
             "prompt": prompt,
-            "model": model,
+            "model": normalized_model,
             "aspect_ratio": aspect_ratio,
         }
 
@@ -246,6 +260,9 @@ class FD_GeminiImage(ComfyNodeABC):
 
         if resolution:
             body["resolution"] = resolution
+        if is_batch_gemini_model(normalized_model):
+            body["batch_task_id"] = batch_task_id
+            body["batch_item_id"] = batch_item_id
         if enable_color_bias_correction is True:
             body["enable_color_bias_correction"] = True
             body["color_bias_reference_image_index"] = (

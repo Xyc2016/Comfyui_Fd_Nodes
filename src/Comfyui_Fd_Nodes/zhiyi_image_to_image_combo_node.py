@@ -5,7 +5,13 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .utils.error_utils import normalize_error_message
-from .utils.gemini_service import GeminiImageServiceClient, compose_prompt, summarize_text
+from .utils.gemini_service import (
+    GeminiImageServiceClient,
+    compose_prompt,
+    is_batch_gemini_model,
+    summarize_text,
+    validate_gemini_batch_ids,
+)
 from .utils.litellm_gemini_image import (
     build_litellm_messages,
     call_litellm_gemini_image,
@@ -39,6 +45,9 @@ class ZhiYiImageToImageComboNode:
         "gemini-3-pro-image-preview-official",
         "gemini-3-pro-image-preview-aistudio",
         "gemini-3-pro-image-preview-siphonlab",
+        "gemini-3-pro-image-preview-vip",
+        "google/gemini-3-pro-image-preview-vip",
+        "batch/gemini-3-pro-image-preview-vip",
     ]
 
     ASPECT_RATIOS = ["", "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"]
@@ -106,6 +115,8 @@ class ZhiYiImageToImageComboNode:
                     "step": 1,
                     "tooltip": "颜色参考图在每个组合最终 image_url_list 中的 0-based 索引",
                 }),
+                "batch_task_id": ("STRING", {"default": ""}),
+                "batch_item_id": ("STRING", {"default": ""}),
             },
         }
 
@@ -130,7 +141,8 @@ class ZhiYiImageToImageComboNode:
         return result
 
     def _single_request(self, image_url_list, prompt, model, aspect_ratio, image_size, seed, out_request_id="",
-                        enable_color_bias_correction=False, color_bias_reference_image_index=0):
+                        enable_color_bias_correction=False, color_bias_reference_image_index=0,
+                        batch_task_id="", batch_item_id=""):
         log_payload = {
             "url": self.gemini_client.service_url,
             "model": model,
@@ -156,6 +168,8 @@ class ZhiYiImageToImageComboNode:
             out_request_id=out_request_id,
             enable_color_bias_correction=enable_color_bias_correction,
             color_bias_reference_image_index=color_bias_reference_image_index,
+            batch_task_id=batch_task_id,
+            batch_item_id=batch_item_id,
         )
         return image
 
@@ -200,8 +214,10 @@ class ZhiYiImageToImageComboNode:
                  combo_5=None, combo_6=None, combo_7=None, combo_8=None,
                  combo_9=None, combo_10=None,
                  system_prompt="", enable_color_bias_correction=False,
-                 color_bias_reference_image_index=0):
+                 color_bias_reference_image_index=0,
+                 batch_task_id="", batch_item_id=""):
         actual_seed = random.randint(0, 2147483647) if seed_mode == "随机种子" else seed
+        validate_gemini_batch_ids(model, batch_task_id, batch_item_id)
         use_litellm = should_use_litellm_gemini(model)
 
         combos = [c for c in [combo_1, combo_2, combo_3, combo_4, combo_5, combo_6, combo_7, combo_8, combo_9, combo_10] if c is not None]
@@ -238,10 +254,22 @@ class ZhiYiImageToImageComboNode:
                             tasks.append((task_idx, self._single_litellm_request, (messages, model, aspect_ratio or None, image_size, s, out_request_id)))
                         else:
                             request_args = (
-                                image_url_list, final_prompt, model, aspect_ratio or None, image_size, s, out_request_id,
+                                image_url_list,
+                                final_prompt,
+                                model,
+                                aspect_ratio or None,
+                                image_size,
+                                s,
+                                out_request_id,
+                                enable_color_bias_correction is True,
+                                (
+                                    color_bias_reference_image_index
+                                    if enable_color_bias_correction is True
+                                    else 0
+                                ),
+                                batch_task_id,
+                                batch_item_id,
                             )
-                            if enable_color_bias_correction is True and "aistudio" not in model.lower():
-                                request_args += (True, color_bias_reference_image_index)
                             tasks.append((task_idx, self._single_request, request_args))
                         task_idx += 1
             except Exception as e:
@@ -256,6 +284,12 @@ class ZhiYiImageToImageComboNode:
                 last_pre_error = pre_errors[-1].split(": ", 1)[-1]
                 raise RuntimeError(last_pre_error)
             raise RuntimeError(normalize_error_message("所有组合均无有效图片"))
+
+        if is_batch_gemini_model(model) and len(tasks) > 1:
+            tasks = [
+                (idx, fn, args[:-1] + (f"{batch_item_id}-{idx}",))
+                for idx, fn, args in tasks
+            ]
 
         print(f"[知衣图生图] 并发发送 {len(tasks)} 个请求（{len(combos)} 个组合 × batch_size {batch_size}），并发上限 {max_concurrency}")
         results, log_lines, last_error_message = self._run_concurrent(tasks, max_concurrency, label="请求")

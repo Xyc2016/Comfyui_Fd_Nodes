@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 MODEL_NAME_MAP = {
     "gemini-2.5-flash-image-preview": "google/gemini-2.5-flash-image-preview",
     "gemini-3-pro-image-preview": "google/gemini-3-pro-image-preview",
+    "gemini-3-pro-image-preview-vip": "google/gemini-3-pro-image-preview-vip",
     "batch/gemini-3-pro-image-preview": "batch/gemini-3-pro-image-preview",
     "gemini-3-pro-image-preview-aistudio": "google/gemini-3-pro-image-preview-official",
     "gemini-3-pro-image-preview-official": "google/gemini-3-pro-image-preview-official",
@@ -57,6 +58,23 @@ def normalize_gemini_model_name(model: str) -> str:
     if model_name.startswith(("google/", "batch/")):
         return model_name
     return MODEL_NAME_MAP.get(model_name, f"google/{model_name}" if model_name else model_name)
+
+
+def is_batch_gemini_model(model: str) -> bool:
+    return normalize_gemini_model_name(model).startswith("batch/")
+
+
+def validate_gemini_batch_ids(
+    model: str,
+    batch_task_id: str = "",
+    batch_item_id: str = "",
+) -> None:
+    if not is_batch_gemini_model(model):
+        return
+    if not isinstance(batch_task_id, str) or not batch_task_id.strip():
+        raise RuntimeError("Batch Gemini 模型要求非空 batch_task_id")
+    if not isinstance(batch_item_id, str) or not batch_item_id.strip():
+        raise RuntimeError("Batch Gemini 模型要求非空 batch_item_id")
 
 
 def compose_prompt(prompt: str, system_prompt: str = "") -> str:
@@ -119,16 +137,23 @@ class GeminiImageServiceClient:
         out_request_id: str = "",
         enable_color_bias_correction: bool = False,
         color_bias_reference_image_index: int = 0,
+        batch_task_id: str = "",
+        batch_item_id: str = "",
     ) -> dict:
+        normalized_model = normalize_gemini_model_name(model)
+        validate_gemini_batch_ids(normalized_model, batch_task_id, batch_item_id)
         body = {
             "out_request_id": out_request_id or "default",
             "prompt": prompt,
-            "model": normalize_gemini_model_name(model),
+            "model": normalized_model,
             "aspect_ratio": aspect_ratio or "",
             "image_url_list": image_url_list,
         }
         if image_size:
             body["resolution"] = image_size
+        if is_batch_gemini_model(normalized_model):
+            body["batch_task_id"] = batch_task_id
+            body["batch_item_id"] = batch_item_id
         if enable_color_bias_correction is True:
             body["enable_color_bias_correction"] = True
             body["color_bias_reference_image_index"] = (
@@ -162,7 +187,10 @@ class GeminiImageServiceClient:
         out_request_id: str = "",
         enable_color_bias_correction: bool = False,
         color_bias_reference_image_index: int = 0,
+        batch_task_id: str = "",
+        batch_item_id: str = "",
     ):
+        validate_gemini_batch_ids(model, batch_task_id, batch_item_id)
         if not self.service_url:
             raise RuntimeError("未配置 Gemini 服务地址，请设置环境变量 FD_GEMINI_URL")
         if not prompt or not prompt.strip():
@@ -179,6 +207,8 @@ class GeminiImageServiceClient:
             out_request_id=out_request_id,
             enable_color_bias_correction=enable_color_bias_correction,
             color_bias_reference_image_index=color_bias_reference_image_index,
+            batch_task_id=batch_task_id,
+            batch_item_id=batch_item_id,
         )
         logger.info("Calling Gemini image service with payload=%s", self.summarize_request_body(body))
 
@@ -234,7 +264,10 @@ class GeminiImageServiceClient:
         out_request_id: str = "",
         enable_color_bias_correction: bool = False,
         color_bias_reference_image_index: int = 0,
+        batch_task_id: str = "",
+        batch_item_id: str = "",
     ):
+        validate_gemini_batch_ids(model, batch_task_id, batch_item_id)
         image_url_list = self.upload_images(image_tensors)
         return self.call_with_image_urls(
             prompt=prompt,
@@ -245,4 +278,6 @@ class GeminiImageServiceClient:
             out_request_id=out_request_id,
             enable_color_bias_correction=enable_color_bias_correction,
             color_bias_reference_image_index=color_bias_reference_image_index,
+            batch_task_id=batch_task_id,
+            batch_item_id=batch_item_id,
         )

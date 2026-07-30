@@ -6,7 +6,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import torch
 
 from .utils.error_utils import normalize_error_message
-from .utils.gemini_service import GeminiImageServiceClient, compose_prompt
+from .utils.gemini_service import (
+    GeminiImageServiceClient,
+    compose_prompt,
+    is_batch_gemini_model,
+    validate_gemini_batch_ids,
+)
 from .utils.litellm_gemini_image import (
     build_litellm_messages,
     call_litellm_gemini_image,
@@ -40,6 +45,9 @@ class ZhiYiImageToImageNode:
         "gemini-3-pro-image-preview-official",
         "gemini-3-pro-image-preview-aistudio",
         "gemini-3-pro-image-preview-siphonlab",
+        "gemini-3-pro-image-preview-vip",
+        "google/gemini-3-pro-image-preview-vip",
+        "batch/gemini-3-pro-image-preview-vip",
     ]
 
     ASPECT_RATIOS = ["", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9"]
@@ -105,6 +113,8 @@ class ZhiYiImageToImageNode:
                     "step": 1,
                     "tooltip": "颜色参考图在最终 image_url_list 中的 0-based 索引",
                 }),
+                "batch_task_id": ("STRING", {"default": ""}),
+                "batch_item_id": ("STRING", {"default": ""}),
             },
         }
 
@@ -118,7 +128,8 @@ class ZhiYiImageToImageNode:
         self.gemini_client = GeminiImageServiceClient()
 
     def _single_request(self, image_url_list, prompt, model, aspect_ratio, image_size, seed, out_request_id="default",
-                        enable_color_bias_correction=False, color_bias_reference_image_index=0):
+                        enable_color_bias_correction=False, color_bias_reference_image_index=0,
+                        batch_task_id="", batch_item_id=""):
         image, _result_url, _message = self.gemini_client.call_with_image_urls(
             prompt=prompt,
             model=model,
@@ -128,6 +139,8 @@ class ZhiYiImageToImageNode:
             out_request_id=out_request_id,
             enable_color_bias_correction=enable_color_bias_correction,
             color_bias_reference_image_index=color_bias_reference_image_index,
+            batch_task_id=batch_task_id,
+            batch_item_id=batch_item_id,
         )
         return image
 
@@ -171,12 +184,14 @@ class ZhiYiImageToImageNode:
                  node_switch=0, out_request_id="default", prompt_list=None,
                  image_2=None, image_3=None, image_4=None,
                  image_5=None, image_6=None, system_prompt="",
-                 enable_color_bias_correction=False, color_bias_reference_image_index=0):
+                 enable_color_bias_correction=False, color_bias_reference_image_index=0,
+                 batch_task_id="", batch_item_id=""):
         if node_switch == 1:
             empty = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
             return (empty, 0)
 
         actual_seed = random.randint(0, 2147483647) if seed_mode == "随机种子" else seed
+        validate_gemini_batch_ids(model, batch_task_id, batch_item_id)
 
         image_tensors = [t for t in [image_1, image_2, image_3, image_4, image_5, image_6] if t is not None]
         use_litellm = should_use_litellm_gemini(model)
@@ -210,11 +225,26 @@ class ZhiYiImageToImageNode:
                 if use_litellm:
                     tasks.append((task_idx, self._single_litellm_request, (messages, model, aspect_ratio or None, image_size, s, out_request_id)))
                 else:
+                    current_batch_item_id = batch_item_id
+                    if is_batch_gemini_model(model) and total > 1:
+                        current_batch_item_id = f"{batch_item_id}-{task_idx}"
                     request_args = (
-                        image_url_list, final_prompt, model, aspect_ratio or None, image_size, s, out_request_id,
+                        image_url_list,
+                        final_prompt,
+                        model,
+                        aspect_ratio or None,
+                        image_size,
+                        s,
+                        out_request_id,
+                        enable_color_bias_correction is True,
+                        (
+                            color_bias_reference_image_index
+                            if enable_color_bias_correction is True
+                            else 0
+                        ),
+                        batch_task_id,
+                        current_batch_item_id,
                     )
-                    if enable_color_bias_correction is True and "aistudio" not in model.lower():
-                        request_args += (True, color_bias_reference_image_index)
                     tasks.append((task_idx, self._single_request, request_args))
                 task_idx += 1
 

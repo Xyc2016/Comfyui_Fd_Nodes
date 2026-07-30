@@ -417,15 +417,19 @@ def test_zhiyi_image_to_image_exposes_out_request_id():
     assert optional_inputs["out_request_id"][1]["default"] == "default"
 
 
-def test_gemini_image_nodes_append_color_bias_inputs():
+def test_gemini_image_nodes_append_color_bias_and_batch_inputs():
     for node_cls in (ZhiYiImageToImageNode, ZhiYiImageToImageComboNode, FD_GeminiImage):
         optional_inputs = node_cls.INPUT_TYPES()["optional"]
-        assert list(optional_inputs)[-2:] == [
+        assert list(optional_inputs)[-4:] == [
             "enable_color_bias_correction",
             "color_bias_reference_image_index",
+            "batch_task_id",
+            "batch_item_id",
         ]
         assert optional_inputs["enable_color_bias_correction"][1]["default"] is False
         assert optional_inputs["color_bias_reference_image_index"][1]["default"] == 0
+        assert optional_inputs["batch_task_id"][1]["default"] == ""
+        assert optional_inputs["batch_item_id"][1]["default"] == ""
 
     signatures = [
         inspect.signature(FD_GeminiImage.api_call),
@@ -439,12 +443,16 @@ def test_gemini_image_nodes_append_color_bias_inputs():
             if parameter.name != "self"
             and parameter.kind is not inspect.Parameter.VAR_KEYWORD
         ]
-        assert [parameter.name for parameter in parameters[-2:]] == [
+        assert [parameter.name for parameter in parameters[-4:]] == [
             "enable_color_bias_correction",
             "color_bias_reference_image_index",
+            "batch_task_id",
+            "batch_item_id",
         ]
         assert signature.parameters["enable_color_bias_correction"].default is False
         assert signature.parameters["color_bias_reference_image_index"].default == 0
+        assert signature.parameters["batch_task_id"].default == ""
+        assert signature.parameters["batch_item_id"].default == ""
 
 
 def test_zhiyi_image_to_image_nodes_expose_legacy_and_channel_models():
@@ -463,6 +471,9 @@ def test_zhiyi_image_to_image_nodes_expose_legacy_and_channel_models():
         "gemini-3.1-flash-image-preview",
         "gemini-3-pro-image-preview-aistudio",
         "gemini-3-pro-image-preview-siphonlab",
+        "gemini-3-pro-image-preview-vip",
+        "google/gemini-3-pro-image-preview-vip",
+        "batch/gemini-3-pro-image-preview-vip",
     }
 
     assert expected_models.issubset(set(ZhiYiImageToImageNode.MODELS))
@@ -480,6 +491,12 @@ def test_zhiyi_image_to_image_nodes_expose_legacy_and_channel_models():
         assert ZhiYiImageToImageComboNode.MODELS.count(model) == 1
     fd_models = FD_GeminiImage.INPUT_TYPES()["required"]["model"][1]["options"]
     assert "batch/gemini-3-pro-image-preview" in fd_models
+    vip_models = {
+        "gemini-3-pro-image-preview-vip",
+        "google/gemini-3-pro-image-preview-vip",
+        "batch/gemini-3-pro-image-preview-vip",
+    }
+    assert vip_models.issubset(set(fd_models))
     for model in new_models:
         assert fd_models.count(model) == 1
     assert ZhiYiImageToImageNode.INPUT_TYPES()["required"]["model"][1]["default"] == "google/gemini-3-pro-image-preview"
@@ -522,6 +539,56 @@ def test_fd_gemini_image_sends_color_bias_fields_as_json_types(monkeypatch):
 
     assert "enable_color_bias_correction" not in requests_bodies[1]
     assert "color_bias_reference_image_index" not in requests_bodies[1]
+
+
+def test_fd_gemini_image_batch_multi_image_uses_one_item_id(monkeypatch):
+    uploads = []
+    request_bodies = []
+    monkeypatch.setattr(
+        "src.Comfyui_Fd_Nodes.old_gemini_api_node.upload_bytes_to_oss",
+        lambda path, data: uploads.append((path, data)) or f"https://oss/{len(uploads)}.png",
+    )
+
+    def fake_post(_url, json):
+        request_bodies.append(json)
+        raise RuntimeError("stop after request capture")
+
+    monkeypatch.setattr("src.Comfyui_Fd_Nodes.old_gemini_api_node.requests.post", fake_post)
+    node = FD_GeminiImage()
+
+    with pytest.raises(RuntimeError, match="stop after request capture"):
+        node.api_call(
+            out_request_id="req-batch",
+            prompt="generate",
+            model="batch/gemini-3-pro-image-preview-vip",
+            images=torch.zeros((2, 2, 2, 3)),
+            batch_task_id="task-1",
+            batch_item_id="item-1",
+        )
+
+    assert len(uploads) == 2
+    assert len(request_bodies) == 1
+    assert request_bodies[0]["batch_task_id"] == "task-1"
+    assert request_bodies[0]["batch_item_id"] == "item-1"
+    assert request_bodies[0]["model"] == "batch/gemini-3-pro-image-preview-vip"
+    assert len(request_bodies[0]["image_url_list"]) == 2
+
+
+def test_fd_gemini_image_batch_validation_precedes_upload(monkeypatch):
+    monkeypatch.setattr(
+        "src.Comfyui_Fd_Nodes.old_gemini_api_node.upload_bytes_to_oss",
+        lambda *_args: pytest.fail("must validate before upload"),
+    )
+
+    with pytest.raises(RuntimeError, match="batch_item_id"):
+        FD_GeminiImage().api_call(
+            out_request_id="req-batch",
+            prompt="generate",
+            model="batch/gemini-3-pro-image-preview",
+            images=torch.zeros((1, 2, 2, 3)),
+            batch_task_id="task",
+            batch_item_id=" ",
+        )
 
 
 def test_gemini_service_builds_internal_request_body():
@@ -568,7 +635,7 @@ def test_gemini_service_builds_internal_request_body():
         assert "enable_color_bias_correction" not in disabled_body
         assert "color_bias_reference_image_index" not in disabled_body
 
-    for invalid_index in (True, "2", 1.5, None):
+    for invalid_index in (True, "2", 2.0, None):
         normalized_body = client.build_request_body(
             prompt="draw product",
             model="gemini-3-pro-image-preview",
@@ -591,8 +658,12 @@ def test_gemini_service_builds_internal_request_body():
         prompt="draw product",
         model="batch/gemini-3-pro-image-preview",
         image_url_list=["https://oss/input.png"],
+        batch_task_id="task-old",
+        batch_item_id="item-old",
     )
     assert old_batch_body["model"] == "batch/gemini-3-pro-image-preview"
+    assert old_batch_body["batch_task_id"] == "task-old"
+    assert old_batch_body["batch_item_id"] == "item-old"
 
     new_models = [
         "google/gemini-3-pro-image-preview-stable",
@@ -606,6 +677,8 @@ def test_gemini_service_builds_internal_request_body():
             prompt="draw product",
             model=model,
             image_url_list=["https://oss/input.png"],
+            batch_task_id="task" if model.startswith("batch/") else "",
+            batch_item_id="item" if model.startswith("batch/") else "",
         )
         assert body["model"] == model
         assert should_use_litellm_gemini(model) is False
@@ -632,15 +705,95 @@ def test_gemini_service_builds_internal_request_body():
     assert aistudio_body["model"] == "google/gemini-3-pro-image-preview-official"
 
 
+def test_gemini_batch_request_body_and_validation():
+    client = GeminiImageServiceClient(service_url="https://gemini.internal")
+
+    normal_body = client.build_request_body(
+        prompt="draw product",
+        model="gemini-3-pro-image-preview-vip",
+        image_url_list=["https://oss/input.png"],
+        batch_task_id="ignored-task",
+        batch_item_id="ignored-item",
+    )
+    assert normal_body["model"] == "google/gemini-3-pro-image-preview-vip"
+    assert "batch_task_id" not in normal_body
+    assert "batch_item_id" not in normal_body
+
+    batch_body = client.build_request_body(
+        prompt="draw product",
+        model="batch/gemini-3-pro-image-preview-vip",
+        image_url_list=["https://oss/input.png"],
+        enable_color_bias_correction=True,
+        color_bias_reference_image_index=0,
+        batch_task_id=" task-1 ",
+        batch_item_id="item-1",
+    )
+    assert batch_body["batch_task_id"] == " task-1 "
+    assert batch_body["batch_item_id"] == "item-1"
+    assert batch_body["enable_color_bias_correction"] is True
+    assert isinstance(batch_body["color_bias_reference_image_index"], int)
+
+    for missing_field, kwargs in (
+        ("batch_task_id", {"batch_task_id": " ", "batch_item_id": "item"}),
+        ("batch_item_id", {"batch_task_id": "task", "batch_item_id": "\t"}),
+    ):
+        with pytest.raises(RuntimeError, match=missing_field):
+            client.build_request_body(
+                prompt="draw product",
+                model="batch/gemini-3-pro-image-preview-stable",
+                image_url_list=["https://oss/input.png"],
+                **kwargs,
+            )
+
+
+def test_gemini_client_batch_validation_precedes_upload_and_http(monkeypatch):
+    uploads = []
+    posts = []
+    client = GeminiImageServiceClient(
+        service_url="https://gemini.internal",
+        oss_uploader=lambda path, data: uploads.append((path, data)) or "https://oss/input.png",
+    )
+    monkeypatch.setattr(
+        "src.Comfyui_Fd_Nodes.utils.gemini_service.requests.post",
+        lambda *args, **kwargs: posts.append((args, kwargs)),
+    )
+
+    with pytest.raises(RuntimeError, match="batch_item_id"):
+        client.call(
+            prompt="draw product",
+            model="batch/gemini-3-pro-image-preview-vip",
+            image_tensors=[torch.zeros((1, 2, 2, 3))],
+            batch_task_id="task",
+            batch_item_id="",
+        )
+    assert uploads == []
+
+    with pytest.raises(RuntimeError, match="batch_task_id"):
+        client.call_with_image_urls(
+            prompt="draw product",
+            model="batch/gemini-3-pro-image-preview",
+            image_url_list=["https://oss/input.png"],
+            batch_task_id=" ",
+            batch_item_id="item",
+        )
+    assert posts == []
+
+
 def test_gemini_service_model_and_prompt_helpers():
     assert normalize_gemini_model_name("gemini-2.5-flash-image-preview") == "google/gemini-2.5-flash-image-preview"
     assert normalize_gemini_model_name("google/gemini-3-pro-image-preview") == "google/gemini-3-pro-image-preview"
     assert normalize_gemini_model_name("batch/gemini-3-pro-image-preview") == "batch/gemini-3-pro-image-preview"
+    assert normalize_gemini_model_name("gemini-3-pro-image-preview-vip") == "google/gemini-3-pro-image-preview-vip"
+    assert normalize_gemini_model_name("google/gemini-3-pro-image-preview-vip") == "google/gemini-3-pro-image-preview-vip"
+    assert normalize_gemini_model_name("batch/gemini-3-pro-image-preview-vip") == "batch/gemini-3-pro-image-preview-vip"
     assert normalize_gemini_model_name("gemini-3-pro-image-preview-official") == "google/gemini-3-pro-image-preview-official"
     assert normalize_gemini_model_name("google/gemini-3-pro-image-preview-official") == "google/gemini-3-pro-image-preview-official"
     assert normalize_gemini_model_name("gemini-3-pro-image-preview-aistudio") == "google/gemini-3-pro-image-preview-official"
     assert should_use_litellm_gemini("gemini-3-pro-image-preview-aistudio") is False
     assert should_use_litellm_gemini("batch/gemini-3-pro-image-preview") is False
+    assert should_use_litellm_gemini("gemini-3-pro-image-preview-vip") is False
+    assert should_use_litellm_gemini("google/gemini-3-pro-image-preview-vip") is False
+    assert should_use_litellm_gemini("batch/gemini-3-pro-image-preview-vip") is False
     assert should_use_litellm_gemini("gemini-3-pro-image-preview-siphonlab") is True
     assert should_use_litellm_gemini("gemini-3.1-flash-image-preview") is False
     assert should_use_litellm_gemini("gemini-3-pro-image-preview") is False
@@ -690,6 +843,67 @@ def test_zhiyi_image_to_image_uses_internal_gemini_service(monkeypatch):
     assert request["out_request_id"] == "req-123"
     assert request["enable_color_bias_correction"] is True
     assert request["color_bias_reference_image_index"] == 1
+    assert request["batch_task_id"] == ""
+    assert request["batch_item_id"] == ""
+
+
+def test_zhiyi_image_to_image_derives_batch_item_ids_in_prompt_batch_order(monkeypatch):
+    node = ZhiYiImageToImageNode()
+    calls = []
+
+    class FakeClient:
+        def upload_images(self, _image_tensors):
+            return ["https://oss/input.png"]
+
+        def call_with_image_urls(self, **kwargs):
+            calls.append(kwargs)
+            return torch.ones((1, 2, 2, 3)), "https://oss/result.png", "ok"
+
+    node.gemini_client = FakeClient()
+    result, _seed = node.generate(
+        image_1=torch.zeros((1, 2, 2, 3)),
+        prompt="fallback",
+        prompt_list=["prompt one", "prompt two"],
+        model="batch/gemini-3-pro-image-preview-vip",
+        aspect_ratio="1:1",
+        image_size="4K",
+        batch_size=2,
+        seed_mode="固定种子",
+        seed=7,
+        batch_task_id="task-1",
+        batch_item_id="item",
+    )
+
+    assert result.shape[0] == 4
+    assert [call["prompt"] for call in calls] == [
+        "prompt one",
+        "prompt one",
+        "prompt two",
+        "prompt two",
+    ]
+    assert [call["batch_item_id"] for call in calls] == [
+        "item-0",
+        "item-1",
+        "item-2",
+        "item-3",
+    ]
+    assert {call["batch_task_id"] for call in calls} == {"task-1"}
+
+
+def test_zhiyi_image_to_image_batch_validation_precedes_upload():
+    node = ZhiYiImageToImageNode()
+    node.gemini_client.upload_images = lambda _images: pytest.fail("must validate before upload")
+
+    with pytest.raises(RuntimeError, match="batch_item_id"):
+        node.generate(
+            image_1=torch.zeros((1, 2, 2, 3)),
+            prompt="prompt",
+            model="batch/gemini-3-pro-image-preview",
+            aspect_ratio="1:1",
+            image_size="2K",
+            batch_task_id="task",
+            batch_item_id=" ",
+        )
 
 
 def test_zhiyi_image_to_image_aistudio_uses_internal_official_model(monkeypatch):
@@ -703,6 +917,8 @@ def test_zhiyi_image_to_image_aistudio_uses_internal_official_model(monkeypatch)
 
         def call_with_image_urls(self, **kwargs):
             calls.append(("call", kwargs))
+            body = GeminiImageServiceClient(service_url="https://gemini.internal").build_request_body(**kwargs)
+            calls.append(("body", body))
             return torch.ones((1, 2, 2, 3), dtype=torch.float32), "https://oss/result.png", "ok"
 
     node.gemini_client = FakeClient()
@@ -720,7 +936,7 @@ def test_zhiyi_image_to_image_aistudio_uses_internal_official_model(monkeypatch)
         out_request_id="req-123",
         system_prompt="system prompt",
         enable_color_bias_correction=True,
-        color_bias_reference_image_index=1,
+        color_bias_reference_image_index=2,
     )
 
     assert result.shape == (1, 2, 2, 3)
@@ -730,9 +946,12 @@ def test_zhiyi_image_to_image_aistudio_uses_internal_official_model(monkeypatch)
     assert request["image_url_list"] == ["https://oss/input.png"]
     assert request["prompt"] == "system prompt\n\nuser prompt"
     assert request["model"] == "gemini-3-pro-image-preview-aistudio"
-    assert request["enable_color_bias_correction"] is False
-    assert request["color_bias_reference_image_index"] == 0
+    assert request["enable_color_bias_correction"] is True
+    assert request["color_bias_reference_image_index"] == 2
     assert normalize_gemini_model_name(request["model"]) == "google/gemini-3-pro-image-preview-official"
+    body = calls[2][1]
+    assert body["enable_color_bias_correction"] is True
+    assert body["color_bias_reference_image_index"] == 2
 
 
 def test_zhiyi_image_to_image_flash_uses_internal_image_server(monkeypatch):
@@ -890,24 +1109,93 @@ def test_zhiyi_image_to_image_combo_uses_internal_gemini_service(monkeypatch):
         "req-456",
         True,
         1,
+        "",
+        "",
     )
     assert calls[1][1] == "system prompt\n\nprompt two"
+
+
+def test_zhiyi_image_to_image_combo_derives_contiguous_batch_item_ids_after_skips(monkeypatch):
+    node = ZhiYiImageToImageComboNode()
+    valid_combo = {
+        "images": [torch.zeros((1, 2, 2, 3))],
+        "prompts": ["prompt one", "prompt two"],
+    }
+    invalid_combo = {"images": [], "prompts": ["skipped"]}
+    calls = []
+
+    monkeypatch.setattr(node.gemini_client, "upload_images", lambda _images: ["https://oss/input.png"])
+
+    def fake_single_request(*args):
+        calls.append(args)
+        return torch.ones((1, 2, 2, 3))
+
+    monkeypatch.setattr(node, "_single_request", fake_single_request)
+    images, _seed, _log = node.generate(
+        model="batch/gemini-3-pro-image-preview-vip",
+        aspect_ratio="1:1",
+        image_size="4K",
+        batch_size=1,
+        max_concurrency=1,
+        seed_mode="固定种子",
+        seed=7,
+        combo_1=invalid_combo,
+        combo_2=valid_combo,
+        batch_task_id="task-1",
+        batch_item_id="item",
+    )
+
+    assert len(images) == 2
+    assert [args[-1] for args in calls] == ["item-0", "item-1"]
+    assert [args[1] for args in calls] == ["prompt one", "prompt two"]
+
+
+def test_zhiyi_image_to_image_combo_batch_validation_precedes_preprocessing():
+    node = ZhiYiImageToImageComboNode()
+    node.gemini_client.upload_images = lambda _images: pytest.fail("must validate before upload")
+
+    with pytest.raises(RuntimeError, match="batch_task_id"):
+        node.generate(
+            model="batch/gemini-3-pro-image-preview-vip",
+            aspect_ratio="1:1",
+            image_size="4K",
+            combo_1={"images": [torch.zeros((1, 2, 2, 3))], "prompts": ["prompt"]},
+            batch_task_id="",
+            batch_item_id="item",
+        )
 
 
 def test_zhiyi_image_to_image_combo_aistudio_uses_internal_official_model(monkeypatch):
     node = ZhiYiImageToImageComboNode()
     node.gemini_client.service_url = "https://gemini.internal/generate"
-    combo = {
+    combo_1 = {
         "images": [torch.zeros((1, 2, 2, 3), dtype=torch.float32)],
         "prompts": ["prompt one"],
     }
+    combo_2 = {
+        "images": [torch.zeros((1, 2, 2, 3), dtype=torch.float32)],
+        "prompts": ["prompt two"],
+    }
     calls = []
 
-    monkeypatch.setattr(node.gemini_client, "upload_images", lambda image_tensors: calls.append(("upload_images", len(image_tensors))) or ["https://oss/input.png"])
+    monkeypatch.setattr(node.gemini_client, "upload_images", lambda _images: ["https://oss/input.png"])
     monkeypatch.setattr(node, "_single_litellm_request", lambda *args: pytest.fail("aistudio should use internal Gemini service"))
 
     def fake_single_request(*args):
-        calls.append(("single_request", args))
+        calls.append(args)
+        body = GeminiImageServiceClient(service_url="https://gemini.internal").build_request_body(
+            prompt=args[1],
+            model=args[2],
+            image_url_list=args[0],
+            aspect_ratio=args[3],
+            image_size=args[4],
+            out_request_id=args[6],
+            enable_color_bias_correction=args[7],
+            color_bias_reference_image_index=args[8],
+            batch_task_id=args[9],
+            batch_item_id=args[10],
+        )
+        calls.append(body)
         return torch.ones((1, 2, 2, 3), dtype=torch.float32)
 
     monkeypatch.setattr(node, "_single_request", fake_single_request)
@@ -921,28 +1209,27 @@ def test_zhiyi_image_to_image_combo_aistudio_uses_internal_official_model(monkey
         seed_mode="固定种子",
         seed=7,
         out_request_id="req-456",
-        combo_1=combo,
+        combo_1=combo_1,
+        combo_2=combo_2,
         system_prompt="system prompt",
         enable_color_bias_correction=True,
-        color_bias_reference_image_index=1,
+        color_bias_reference_image_index=2,
     )
 
-    assert len(images) == 1
+    assert len(images) == 2
     assert actual_seed == 7
     assert "url=https://gemini.internal/generate" in log_text
-    assert calls[0] == ("upload_images", 1)
-    assert calls[1][0] == "single_request"
-    request_args = calls[1][1]
-    assert request_args == (
-        ["https://oss/input.png"],
-        "system prompt\n\nprompt one",
-        "gemini-3-pro-image-preview-aistudio",
-        "1:1",
-        "4K",
-        7,
-        "req-456",
-    )
-    assert normalize_gemini_model_name(request_args[2]) == "google/gemini-3-pro-image-preview-official"
+    request_args = [call for call in calls if isinstance(call, tuple)]
+    bodies = [call for call in calls if isinstance(call, dict)]
+    assert len(request_args) == 2
+    assert len(bodies) == 2
+    for args, body in zip(request_args, bodies):
+        assert args[2] == "gemini-3-pro-image-preview-aistudio"
+        assert args[7] is True
+        assert args[8] == 2
+        assert body["enable_color_bias_correction"] is True
+        assert body["color_bias_reference_image_index"] == 2
+        assert body["model"] == "google/gemini-3-pro-image-preview-official"
 
 
 @pytest.mark.parametrize(

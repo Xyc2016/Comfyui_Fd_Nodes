@@ -193,7 +193,7 @@ wheels = [
 
 [[package]]
 name = "comfyui-fd-nodes"
-version = "53.8.27"
+version = "53.8.28"
 source = { editable = "." }
 dependencies = [
     { name = "comfy-cli" },
