@@ -1,4 +1,5 @@
 import json
+import re
 import time
 
 import requests
@@ -47,6 +48,70 @@ class FD_Upload:
             return ("",)
 
 
+def normalize_binary_decision(value, default_value=0):
+    """将 VLM 检测输出归一化为 0 或 1 的 int。
+
+    接受 None、空字符串、空白、Markdown code fence、首尾换行及带单一明确
+    "0"/"1" 的解释文本；从 "10"、"01"、"1.0" 或同时包含 0 与 1 的歧义文本
+    中不提取结果，无法确定时返回 default_value（调用方保证其为 0 或 1）。
+    """
+    if default_value not in (0, 1):
+        default_value = 0
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value if value in (0, 1) else default_value
+    if isinstance(value, float):
+        return int(value) if value in (0.0, 1.0) else default_value
+    if not isinstance(value, str):
+        return default_value
+    text = value.strip()
+    if not text:
+        return default_value
+    text = re.sub(r"^```[a-zA-Z0-9]*\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    text = text.strip()
+    if text == "0":
+        return 0
+    if text == "1":
+        return 1
+    if text.isdigit():
+        return default_value
+    tokens = set(re.findall(r"\b0\b|\b1\b", text))
+    if tokens == {"0"}:
+        return 0
+    if tokens == {"1"}:
+        return 1
+    return default_value
+
+
+class FD_BinaryDecisionNormalizer:
+    # 将文本二值判定结果归一化为 0 或 1 的 int，任何情况下不向后续 switch 传 None
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "text": ("STRING", {"multiline": True, "default": "", "forceInput": True}),
+                "default_value": ("INT", {"default": 0, "min": 0, "max": 1}),
+            }
+        }
+
+    RETURN_TYPES = ("INT",)
+    RETURN_NAMES = ("index",)
+    FUNCTION = "normalize"
+    OUTPUT_NODE = False
+    CATEGORY = "image/captioning"
+
+    def normalize(self, text, default_value=0):
+        if default_value not in (0, 1):
+            default_value = 0
+        result = normalize_binary_decision(text, default_value)
+        return (0 if result != 1 else 1,)
+
+
 class FD_imgToText_Doubao:
     # 调用豆包的图生文节点
     def __init__(self):
@@ -81,17 +146,15 @@ class FD_imgToText_Doubao:
             , "TagTime": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
             , "extra_body": {"thinking":{"type":"disabled"}}
         }
-        raw_data = requests.post(FD_DOUBAO_URL, headers=headers,
-                                 data=json.dumps(req_params))
-
         try:
+            raw_data = requests.post(FD_DOUBAO_URL, headers=headers,
+                                     data=json.dumps(req_params))
             data = json.loads(raw_data.content)
             print(data)
             if data["status"] is not True:
                 print("上传错误请看上面提示错误或者关闭vpn")
                 return (defaultPrompt,)
-            else:
-                return (data["response"]["Result"],)
+            return (data["response"]["Result"],)
         except Exception as e:
             print(e)
             return (defaultPrompt,)

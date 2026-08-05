@@ -28,7 +28,7 @@ from .config import (
     FD_Z_IMAGE_TURBO_URL,
     FD_Z_IMAGE_TURBO_USERNAME,
 )
-from .old_fd_nodes import FD_imgToText_Doubao, FD_Upload
+from .old_fd_nodes import FD_BinaryDecisionNormalizer, FD_imgToText_Doubao, FD_Upload
 from .old_gemini_api_node import FD_GeminiImage, GenImageServiceError
 from .utils.common_util import (
     bytes_calculate_hex_md5,
@@ -884,6 +884,7 @@ NODE_CLASS_MAPPINGS = {
     "FD_RemoveWatermark": FD_RemoveWatermark,
     "FD_Upload": FD_Upload,
     "FD_imgToText_Doubao": FD_imgToText_Doubao,
+    "FD_BinaryDecisionNormalizer": FD_BinaryDecisionNormalizer,
     "FD_GeminiImage": FD_GeminiImage,
     "FD_GTPImage": FD_GTPImage,
     "FD_GPTImageComboNode": FD_GPTImageComboNode,
@@ -922,6 +923,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FD_RemoveWatermark": "Remove Watermark",
     "FD_Upload": "FD Upload to OSS",
     "FD_imgToText_Doubao": "FD Image to Text (Doubao)",
+    "FD_BinaryDecisionNormalizer": "FD Binary Decision Normalizer",
     "FD_GeminiImage": "FD Gemini Image",
     "FD_GTPImage": "FD GTP Image",
     "FD_GPTImageComboNode": "FD GPT Image Combo",
