@@ -244,6 +244,7 @@ class ZhiYiImageTextNode:
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
+                    "Connection": "close",
                 },
                 data=json.dumps(payload),
                 timeout=600,
