@@ -2,6 +2,7 @@
 
 """Tests for `Comfyui_Fd_Nodes` package."""
 
+import base64
 import inspect
 import io
 import json
@@ -1533,7 +1534,7 @@ def test_zhiyi_image_text_request_logs_request_and_response_without_images(monke
         captured_logs.append(("post_payload", json.loads(data)))
         return DummyResponse()
 
-    def fake_image_tensor_to_data_url(_image):
+    def fake_image_tensor_to_data_url(_image, max_data_url_bytes):
         return (
             "data:image/jpeg;base64,AAA",
             {
@@ -1547,7 +1548,7 @@ def test_zhiyi_image_text_request_logs_request_and_response_without_images(monke
                 "quality": 85,
                 "image_bytes": 3,
                 "data_url_bytes": 26,
-                "max_data_url_bytes": zhiyi_image_text_module.MAX_IMAGE_DATA_URL_BYTES,
+                "max_data_url_bytes": max_data_url_bytes,
                 "resized": False,
             },
         )
@@ -1581,6 +1582,8 @@ def test_zhiyi_image_text_request_logs_request_and_response_without_images(monke
     encoded_image_log = next(args[0] for message, args in captured_logs if message == "ZhiYi image-to-text encoded image: %s")
     assert encoded_image_log["mime_type"] == "image/jpeg"
     assert "data:image/jpeg;base64,AAA" not in json.dumps(request_log, ensure_ascii=False)
+    assert request_log["request_body_bytes"] <= zhiyi_image_text_module.MAX_REQUEST_BODY_BYTES
+    assert request_log["max_request_body_bytes"] == zhiyi_image_text_module.MAX_REQUEST_BODY_BYTES
     response_log = next(args[0] for message, args in captured_logs if message == "ZhiYi image-to-text API response summary: %s")
     assert response_log["status_code"] == 200
     assert response_log["choice_count"] == 1
@@ -1645,11 +1648,12 @@ def test_zhiyi_image_text_recompresses_until_data_url_is_under_limit(monkeypatch
     node = ZhiYiImageTextNode()
     image = torch.rand((1, 512, 512, 3), dtype=torch.float32)
 
-    monkeypatch.setattr(zhiyi_image_text_module, "MAX_IMAGE_DATA_URL_BYTES", 50_000)
     monkeypatch.setattr(zhiyi_image_text_module, "MIN_IMAGE_LONG_EDGE", 128)
     monkeypatch.setattr(zhiyi_image_text_module, "IMAGE_RESIZE_FACTOR", 0.5)
 
-    data_url, info = node._image_tensor_to_data_url(image)
+    data_url, info = node._image_tensor_to_data_url(
+        image, max_data_url_bytes=50_000
+    )
 
     assert data_url.startswith("data:image/jpeg;base64,")
     assert len(data_url.encode("utf-8")) <= 50_000
@@ -1666,11 +1670,10 @@ def test_zhiyi_image_text_raises_clear_error_when_image_cannot_fit(monkeypatch):
     node = ZhiYiImageTextNode()
     image = torch.zeros((1, 4, 4, 3), dtype=torch.float32)
 
-    monkeypatch.setattr(zhiyi_image_text_module, "MAX_IMAGE_DATA_URL_BYTES", 1)
     monkeypatch.setattr(zhiyi_image_text_module, "MIN_IMAGE_LONG_EDGE", 1)
 
-    with pytest.raises(RuntimeError, match="10MB 传输限制"):
-        node._image_tensor_to_data_url(image)
+    with pytest.raises(RuntimeError, match="可用传输预算"):
+        node._image_tensor_to_data_url(image, max_data_url_bytes=1)
 
 
 def test_zhiyi_image_text_http_error_includes_response_body(monkeypatch):
@@ -1686,7 +1689,11 @@ def test_zhiyi_image_text_http_error_includes_response_body(monkeypatch):
             raise AssertionError("json should not be called for non-2xx responses")
 
     monkeypatch.setattr(zhiyi_image_text_module, "load_config", lambda: {"base_url": "https://example.com", "api_key": "secret"})
-    monkeypatch.setattr(node, "_image_tensor_to_data_url", lambda _image: ("data:image/jpeg;base64,AAA", {}))
+    monkeypatch.setattr(
+        node,
+        "_image_tensor_to_data_url",
+        lambda _image, max_data_url_bytes: ("data:image/jpeg;base64,AAA", {}),
+    )
     monkeypatch.setattr(zhiyi_image_text_module.requests, "post", lambda *args, **kwargs: DummyResponse())
 
     with pytest.raises(RuntimeError) as exc_info:
@@ -1735,8 +1742,12 @@ def test_zhiyi_image_text_combo_sends_multiple_images_in_one_request(monkeypatch
         captured_payloads.append(json.loads(data))
         return DummyResponse()
 
-    def fake_image_tensor_to_data_url(image_tensor):
-        index = len(captured_logs) + 1
+    encoded_count = 0
+
+    def fake_image_tensor_to_data_url(image_tensor, max_data_url_bytes):
+        nonlocal encoded_count
+        encoded_count += 1
+        index = encoded_count
         return (
             f"data:image/jpeg;base64,IMG{index}",
             {
@@ -1746,7 +1757,7 @@ def test_zhiyi_image_text_combo_sends_multiple_images_in_one_request(monkeypatch
                 "quality": 85,
                 "image_bytes": index,
                 "data_url_bytes": 30,
-                "max_data_url_bytes": zhiyi_image_text_module.MAX_IMAGE_DATA_URL_BYTES,
+                "max_data_url_bytes": max_data_url_bytes,
                 "resized": False,
             },
         )
@@ -1792,10 +1803,14 @@ def test_zhiyi_image_text_combo_keeps_output_order_when_requests_finish_out_of_o
     image = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
 
     monkeypatch.setattr(zhiyi_image_text_combo_module, "load_config", lambda: {"base_url": "https://example.com", "api_key": "secret"})
-    monkeypatch.setattr(node, "_image_tensor_to_data_url", lambda _image: ("data:image/jpeg;base64,AAA", {}))
+    monkeypatch.setattr(
+        node,
+        "_image_tensor_to_data_url",
+        lambda _image, max_data_url_bytes: ("data:image/jpeg;base64,AAA", {}),
+    )
 
-    def fake_single_request(url, api_key, messages, temperature, max_tokens, retry_count):
-        prompt = messages[-1]["content"][0]["text"]
+    def fake_single_request(url, api_key, request_body, request_log, retry_count):
+        prompt = json.loads(request_body)["messages"][-1]["content"][0]["text"]
         if prompt == "first":
             return "text first", 0
         return "text second", 0
@@ -1848,12 +1863,18 @@ def test_zhiyi_image_text_combo_retries_once_after_retryable_failure(monkeypatch
     monkeypatch.setattr(zhiyi_image_text_combo_module.requests, "post", fake_post)
     monkeypatch.setattr(node, "_sleep_before_retry", lambda _attempt_index: None)
 
+    request_body = json.dumps({
+        "stream": False,
+        "model": "doubao-seed-2.0-mini",
+        "messages": [{"role": "user", "content": [{"type": "text", "text": "prompt"}]}],
+        "temperature": 0.7,
+        "max_tokens": 128,
+    })
     text, retry_used = node._single_request(
         url="https://example.com/v1/chat/completions",
         api_key="secret",
-        messages=[{"role": "user", "content": [{"type": "text", "text": "prompt"}]}],
-        temperature=0.7,
-        max_tokens=128,
+        request_body=request_body,
+        request_log={},
         retry_count=1,
     )
 
@@ -1867,7 +1888,11 @@ def test_zhiyi_image_text_combo_keeps_failure_placeholder_for_partial_failure(mo
     image = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
 
     monkeypatch.setattr(zhiyi_image_text_combo_module, "load_config", lambda: {"base_url": "https://example.com", "api_key": "secret"})
-    monkeypatch.setattr(node, "_image_tensor_to_data_url", lambda _image: ("data:image/jpeg;base64,AAA", {}))
+    monkeypatch.setattr(
+        node,
+        "_image_tensor_to_data_url",
+        lambda _image, max_data_url_bytes: ("data:image/jpeg;base64,AAA", {}),
+    )
 
     def fake_run_concurrent(tasks, max_workers, label="请求"):
         return (
@@ -1898,7 +1923,11 @@ def test_zhiyi_image_text_combo_raises_when_all_requests_fail(monkeypatch):
     image = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
 
     monkeypatch.setattr(zhiyi_image_text_combo_module, "load_config", lambda: {"base_url": "https://example.com", "api_key": "secret"})
-    monkeypatch.setattr(node, "_image_tensor_to_data_url", lambda _image: ("data:image/jpeg;base64,AAA", {}))
+    monkeypatch.setattr(
+        node,
+        "_image_tensor_to_data_url",
+        lambda _image, max_data_url_bytes: ("data:image/jpeg;base64,AAA", {}),
+    )
     monkeypatch.setattr(
         node,
         "_run_concurrent",
@@ -1915,6 +1944,154 @@ def test_zhiyi_image_text_combo_raises_when_all_requests_fail(monkeypatch):
             retry_count=0,
             combo_1={"images": [image], "prompts": ["first"]},
         )
+
+def test_zhiyi_image_text_large_image_request_stays_under_48kb_and_is_valid_jpeg(monkeypatch):
+    node = ZhiYiImageTextNode()
+    image = torch.rand((1, 2730, 2048, 3), dtype=torch.float32)
+    captured = {"logs": []}
+    original_serialize_request_body = node._serialize_request_body
+
+    class DummyResponse:
+        ok = True
+        status_code = 200
+        text = '{"choices":[{"message":{"content":"description"}}]}'
+
+        def json(self):
+            return {"choices": [{"message": {"content": "description"}}]}
+
+    def fake_post(url, headers, data, timeout):
+        captured.update(url=url, headers=headers, data=data, timeout=timeout)
+        return DummyResponse()
+
+    def capture_serialized_body(payload):
+        result = original_serialize_request_body(payload)
+        captured["serialized_body"] = result[0]
+        return result
+
+    monkeypatch.setattr(zhiyi_image_text_module, "load_config", lambda: {
+        "base_url": "https://example.com",
+        "api_key": "secret",
+    })
+    monkeypatch.setattr(zhiyi_image_text_module.requests, "post", fake_post)
+    monkeypatch.setattr(node, "_serialize_request_body", capture_serialized_body)
+    monkeypatch.setattr(
+        zhiyi_image_text_module.logger,
+        "info",
+        lambda message, *args: captured["logs"].append((message, args)),
+    )
+
+    assert node.generate(image=image, prompt="describe", node_switch=0) == ("description",)
+
+    request_body = captured["data"]
+    assert request_body is captured["serialized_body"]
+    payload = json.loads(request_body)
+    data_url = payload["messages"][-1]["content"][1]["image_url"]["url"]
+    jpeg_bytes = base64.b64decode(data_url.split(",", 1)[1])
+    decoded = Image.open(io.BytesIO(jpeg_bytes))
+
+    assert len(request_body.encode("utf-8")) <= zhiyi_image_text_module.MAX_REQUEST_BODY_BYTES
+    assert decoded.format == "JPEG"
+    assert decoded.size[0] <= 2048
+    assert decoded.size[1] <= 2730
+    assert abs((decoded.size[0] / decoded.size[1]) - (2048 / 2730)) < 0.002
+    assert captured["headers"] == {
+        "Authorization": "Bearer secret",
+        "Content-Type": "application/json",
+        "Connection": "close",
+    }
+    assert list(captured["headers"]).count("Connection") == 1
+    assert captured["timeout"] == (5, 120)
+    image_log = next(
+        args[0]
+        for message, args in captured["logs"]
+        if message == "ZhiYi image-to-text encoded image: %s"
+    )
+    assert image_log["original_size"] == (2048, 2730)
+    assert image_log["final_size"] == decoded.size
+    assert image_log["quality"] in zhiyi_image_text_module.JPEG_QUALITY_STEPS
+    assert image_log["image_bytes"] == len(jpeg_bytes)
+    assert image_log["data_url_bytes"] == len(data_url.encode("utf-8"))
+    assert image_log["request_body_bytes"] == len(request_body.encode("utf-8"))
+    assert image_log["max_request_body_bytes"] == zhiyi_image_text_module.MAX_REQUEST_BODY_BYTES
+
+
+def test_zhiyi_image_text_small_image_keeps_dimensions_with_request_budget():
+    node = ZhiYiImageTextNode()
+    image = torch.zeros((1, 32, 48, 3), dtype=torch.float32)
+    messages = node._build_messages("describe", [""], "")
+    budget = node._image_budget(node._build_request_payload(messages, 0.7, 2048), 1)
+
+    data_url, info = node._image_tensor_to_data_url(image, max_data_url_bytes=budget)
+    decoded = Image.open(io.BytesIO(base64.b64decode(data_url.split(",", 1)[1])))
+
+    assert decoded.size == (48, 32)
+    assert info["final_size"] == (48, 32)
+    assert info["quality"] == 85
+    assert info["resized"] is False
+
+
+def test_zhiyi_image_text_rejects_prompt_with_no_image_budget(monkeypatch):
+    node = ZhiYiImageTextNode()
+    monkeypatch.setattr(zhiyi_image_text_module, "load_config", lambda: {
+        "base_url": "https://example.com",
+        "api_key": "secret",
+    })
+    monkeypatch.setattr(
+        zhiyi_image_text_module.requests,
+        "post",
+        lambda *_args, **_kwargs: pytest.fail("must fail before HTTP"),
+    )
+
+    with pytest.raises(RuntimeError, match="没有可用的图片字节预算"):
+        node.generate(
+            image=torch.zeros((1, 2, 2, 3)),
+            prompt="x" * zhiyi_image_text_module.MAX_REQUEST_BODY_BYTES,
+            node_switch=0,
+        )
+
+
+def test_zhiyi_image_text_combo_multi_image_body_is_identical_and_under_48kb(monkeypatch):
+    node = ZhiYiImageTextComboNode()
+    captured = {}
+    images = torch.zeros((2, 1024, 768, 3), dtype=torch.float32)
+
+    class DummyResponse:
+        status_code = 200
+        text = '{"choices":[{"message":{"content":"both"}}]}'
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "both"}}]}
+
+    def fake_post(url, headers, data, timeout):
+        captured.update(url=url, headers=headers, data=data, timeout=timeout)
+        return DummyResponse()
+
+    monkeypatch.setattr(zhiyi_image_text_combo_module, "load_config", lambda: {
+        "base_url": "https://example.com",
+        "api_key": "secret",
+    })
+    monkeypatch.setattr(zhiyi_image_text_combo_module.requests, "post", fake_post)
+
+    text, _log = node.generate(
+        max_concurrency=1,
+        retry_count=0,
+        combo_1={"images": [images], "prompts": ["describe both"]},
+    )
+
+    assert text == "both"
+    assert len(captured["data"].encode("utf-8")) <= zhiyi_image_text_module.MAX_REQUEST_BODY_BYTES
+    payload = json.loads(captured["data"])
+    assert json.dumps(payload) == captured["data"]
+    assert len(payload["messages"][-1]["content"]) == 3
+    assert captured["headers"] == {
+        "Authorization": "Bearer secret",
+        "Content-Type": "application/json",
+        "Connection": "close",
+    }
+    assert captured["timeout"] == (5, 120)
 
 
 def test_zhiyi_text_gen_request_logs_request_and_response(monkeypatch):

@@ -13,8 +13,9 @@ logger = logging.getLogger(__name__)
 
 MAX_IMAGE_DATA_URL_BYTES = 10_000_000
 MAX_IMAGE_TOTAL_PIXELS = 35_000_000
-JPEG_QUALITY_STEPS = (85, 80, 75, 70, 65, 60)
-MIN_IMAGE_LONG_EDGE = 1024
+MAX_REQUEST_BODY_BYTES = 48_000
+JPEG_QUALITY_STEPS = (85, 75, 65, 55, 45, 35, 25)
+MIN_IMAGE_LONG_EDGE = 512
 IMAGE_RESIZE_FACTOR = 0.8
 
 
@@ -102,7 +103,16 @@ class ZhiYiImageTextNode:
         )
         return pil_img.resize(new_size, Image.Resampling.LANCZOS)
 
-    def _image_tensor_to_data_url(self, image_tensor):
+    def _image_tensor_to_data_url(
+        self,
+        image_tensor,
+        max_data_url_bytes=MAX_IMAGE_DATA_URL_BYTES,
+    ):
+        if max_data_url_bytes <= 0:
+            raise RuntimeError(
+                "图生文请求体没有可用的图片字节预算，请缩短 prompt 或 system_prompt"
+            )
+
         original_img = self._image_tensor_to_pil(image_tensor)
         original_size = original_img.size
         original_pixels = original_size[0] * original_size[1]
@@ -129,11 +139,11 @@ class ZhiYiImageTextNode:
                     "quality": quality,
                     "image_bytes": image_bytes,
                     "data_url_bytes": data_url_bytes,
-                    "max_data_url_bytes": MAX_IMAGE_DATA_URL_BYTES,
+                    "max_data_url_bytes": max_data_url_bytes,
                     "resized": candidate_img.size != original_size,
                 }
                 best_result = (data_url, info)
-                if data_url_bytes <= MAX_IMAGE_DATA_URL_BYTES:
+                if data_url_bytes <= max_data_url_bytes:
                     return best_result
 
             if current_long_edge <= MIN_IMAGE_LONG_EDGE:
@@ -142,10 +152,61 @@ class ZhiYiImageTextNode:
 
         _, info = best_result
         raise RuntimeError(
-            "图生文输入图片压缩后仍超过 10MB 传输限制: "
-            f"{info['data_url_bytes']} bytes > {MAX_IMAGE_DATA_URL_BYTES} bytes; "
-            "请降低输入图片分辨率后重试"
+            "图生文输入图片压缩后仍超过可用传输预算: "
+            f"{info['data_url_bytes']} bytes > {max_data_url_bytes} bytes; "
+            "请缩短 prompt 或降低输入图片分辨率后重试"
         )
+
+    def _build_messages(self, prompt, data_urls, system_prompt=""):
+        messages = []
+        system_text = (system_prompt or "").strip()
+        if system_text:
+            messages.append({
+                "role": "system",
+                "content": [{"type": "text", "text": system_text}],
+            })
+        messages.append({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                *[
+                    {"type": "image_url", "image_url": {"url": data_url}}
+                    for data_url in data_urls
+                ],
+            ],
+        })
+        return messages
+
+    def _build_request_payload(self, messages, temperature, max_tokens):
+        return {
+            "stream": False,
+            "model": "doubao-seed-2.0-mini",
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+
+    def _serialize_request_body(self, payload):
+        request_body = json.dumps(payload)
+        request_body_bytes = len(request_body.encode("utf-8"))
+        if request_body_bytes > MAX_REQUEST_BODY_BYTES:
+            raise RuntimeError(
+                "图生文请求体超过 48000 字节限制: "
+                f"{request_body_bytes} bytes > {MAX_REQUEST_BODY_BYTES} bytes; "
+                "请缩短 prompt、system_prompt 或减少图片数量"
+            )
+        return request_body, request_body_bytes
+
+    def _image_budget(self, placeholder_payload, image_count):
+        placeholder_body = json.dumps(placeholder_payload)
+        available_image_bytes = (
+            MAX_REQUEST_BODY_BYTES - len(placeholder_body.encode("utf-8"))
+        )
+        if available_image_bytes <= 0:
+            raise RuntimeError(
+                "图生文请求体没有可用的图片字节预算，请缩短 prompt 或 system_prompt"
+            )
+        return available_image_bytes // image_count
 
     def _summarize_messages_for_log(self, messages):
         summarized_messages = []
@@ -202,30 +263,21 @@ class ZhiYiImageTextNode:
         base_url = base_url.rstrip("/")
         url = f"{base_url}/v1/chat/completions"
 
-        data_url, image_info = self._image_tensor_to_data_url(image)
+        placeholder_messages = self._build_messages(prompt, [""], system_prompt)
+        placeholder_payload = self._build_request_payload(
+            placeholder_messages, temperature, max_tokens
+        )
+        image_budget = self._image_budget(placeholder_payload, 1)
+        data_url, image_info = self._image_tensor_to_data_url(
+            image, max_data_url_bytes=image_budget
+        )
+        messages = self._build_messages(prompt, [data_url], system_prompt)
+        payload = self._build_request_payload(messages, temperature, max_tokens)
+        request_body, request_body_bytes = self._serialize_request_body(payload)
+        image_info["request_body_bytes"] = request_body_bytes
+        image_info["max_request_body_bytes"] = MAX_REQUEST_BODY_BYTES
         logger.info("ZhiYi image-to-text encoded image: %s", image_info)
 
-        messages = []
-        if system_prompt.strip():
-            messages.append({
-                "role": "system",
-                "content": [{"type": "text", "text": system_prompt}],
-            })
-        messages.append({
-            "role": "user",
-            "content": [
-                {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": data_url}},
-            ],
-        })
-
-        payload = {
-            "stream": False,
-            "model": "doubao-seed-2.0-mini",
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
         logger.info(
             "Calling ZhiYi image-to-text API with payload=%s",
             {
@@ -234,6 +286,8 @@ class ZhiYiImageTextNode:
                 "model": payload["model"],
                 "temperature": payload["temperature"],
                 "max_tokens": payload["max_tokens"],
+                "request_body_bytes": request_body_bytes,
+                "max_request_body_bytes": MAX_REQUEST_BODY_BYTES,
                 "messages": self._summarize_messages_for_log(messages),
             },
         )
@@ -246,8 +300,8 @@ class ZhiYiImageTextNode:
                     "Content-Type": "application/json",
                     "Connection": "close",
                 },
-                data=json.dumps(payload),
-                timeout=600,
+                data=request_body,
+                timeout=(5, 120),
             )
             if not response.ok:
                 raise RuntimeError(f"API 请求失败: {response.status_code}\n{response.text[:1000]}")

@@ -1,4 +1,3 @@
-import json
 import logging
 import time
 import traceback
@@ -9,7 +8,7 @@ import requests
 from .config_manager import load_config
 from .utils.error_utils import normalize_error_message
 from .utils.logging_utils import configure_default_logging
-from .zhiyi_image_text_node import ZhiYiImageTextNode
+from .zhiyi_image_text_node import MAX_REQUEST_BODY_BYTES, ZhiYiImageTextNode
 
 configure_default_logging()
 logger = logging.getLogger(__name__)
@@ -149,14 +148,7 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
     def _sleep_before_retry(self, attempt_index):
         time.sleep(min(2 ** attempt_index, 2))
 
-    def _single_request(self, url, api_key, messages, temperature, max_tokens, retry_count):
-        payload = {
-            "stream": False,
-            "model": self.MODEL,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
+    def _single_request(self, url, api_key, request_body, request_log, retry_count):
         max_attempts = max(1, int(retry_count) + 1)
         last_error = None
 
@@ -166,14 +158,9 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                 logger.info(
                     "Calling ZhiYi image-to-text combo API with payload=%s",
                     {
-                        "url": url,
-                        "stream": payload["stream"],
-                        "model": payload["model"],
-                        "temperature": payload["temperature"],
-                        "max_tokens": payload["max_tokens"],
+                        **request_log,
                         "attempt": attempt_index + 1,
                         "max_attempts": max_attempts,
-                        "messages": self._summarize_messages_for_log(messages),
                     },
                 )
                 response = requests.post(
@@ -183,8 +170,8 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                         "Content-Type": "application/json",
                         "Connection": "close",
                     },
-                    data=json.dumps(payload),
-                    timeout=600,
+                    data=request_body,
+                    timeout=(5, 120),
                 )
 
                 status_code = getattr(response, "status_code", None)
@@ -324,21 +311,49 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                 if not expanded_images:
                     raise RuntimeError("无有效图片")
 
+                prompt = self._select_prompt(combo)
+                placeholder_messages = self._build_messages(
+                    prompt, [""] * len(expanded_images), system_prompt
+                )
+                placeholder_payload = self._build_request_payload(
+                    placeholder_messages, temperature, max_tokens
+                )
+                image_budget = self._image_budget(
+                    placeholder_payload, len(expanded_images)
+                )
+
                 data_urls = []
-                for image_index, image in enumerate(expanded_images, start=1):
-                    data_url, image_info = self._image_tensor_to_data_url(image)
-                    logger.info(
-                        "ZhiYi image-to-text combo encoded image: %s",
-                        {
-                            "combo": combo_slot,
-                            "image": image_index,
-                            **image_info,
-                        },
+                image_infos = []
+                for image in expanded_images:
+                    data_url, image_info = self._image_tensor_to_data_url(
+                        image, max_data_url_bytes=image_budget
                     )
                     data_urls.append(data_url)
+                    image_infos.append(image_info)
 
-                prompt = self._select_prompt(combo)
                 messages = self._build_messages(prompt, data_urls, system_prompt)
+                payload = self._build_request_payload(messages, temperature, max_tokens)
+                request_body, request_body_bytes = self._serialize_request_body(payload)
+                for image_index, image_info in enumerate(image_infos, start=1):
+                    image_info["combo"] = combo_slot
+                    image_info["image"] = image_index
+                    image_info["request_body_bytes"] = request_body_bytes
+                    image_info["max_request_body_bytes"] = MAX_REQUEST_BODY_BYTES
+                    logger.info(
+                        "ZhiYi image-to-text combo encoded image: %s",
+                        image_info,
+                    )
+
+                request_log = {
+                    "url": url,
+                    "stream": payload["stream"],
+                    "model": payload["model"],
+                    "temperature": payload["temperature"],
+                    "max_tokens": payload["max_tokens"],
+                    "request_body_bytes": request_body_bytes,
+                    "max_request_body_bytes": MAX_REQUEST_BODY_BYTES,
+                    "messages": self._summarize_messages_for_log(messages),
+                }
                 tasks.append(
                     (
                         result_index,
@@ -347,9 +362,8 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                         (
                             url,
                             api_key,
-                            messages,
-                            temperature,
-                            max_tokens,
+                            request_body,
+                            request_log,
                             retry_count,
                         ),
                     )
