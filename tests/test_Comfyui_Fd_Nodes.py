@@ -1665,15 +1665,105 @@ def test_zhiyi_image_text_recompresses_until_data_url_is_under_limit(monkeypatch
     assert info["resized"] is True
 
 
-def test_zhiyi_image_text_raises_clear_error_when_image_cannot_fit(monkeypatch):
-    """If every compression attempt remains too large, the node should fail before making the API request."""
+def test_zhiyi_image_text_falls_back_to_original_size_when_image_cannot_fit(monkeypatch):
+    """If compression cannot meet the budget, keep the original dimensions and continue."""
     node = ZhiYiImageTextNode()
-    image = torch.zeros((1, 4, 4, 3), dtype=torch.float32)
+    image = torch.zeros((1, 4, 6, 3), dtype=torch.float32)
 
     monkeypatch.setattr(zhiyi_image_text_module, "MIN_IMAGE_LONG_EDGE", 1)
 
-    with pytest.raises(RuntimeError, match="可用传输预算"):
-        node._image_tensor_to_data_url(image, max_data_url_bytes=1)
+    data_url, info = node._image_tensor_to_data_url(image, max_data_url_bytes=1)
+    decoded = Image.open(io.BytesIO(base64.b64decode(data_url.split(",", 1)[1])))
+
+    assert decoded.size == (6, 4)
+    assert info["original_size"] == (6, 4)
+    assert info["final_size"] == (6, 4)
+    assert info["resized"] is False
+    assert info["compression_fallback"] is True
+    assert info["budget_exceeded"] is True
+    assert info["data_url_bytes"] > 1
+
+
+def test_zhiyi_image_text_fallback_still_sends_over_budget_request(monkeypatch):
+    node = ZhiYiImageTextNode()
+    captured = {}
+    fallback_data_url = "data:image/jpeg;base64," + ("A" * 50_000)
+
+    class DummyResponse:
+        ok = True
+        status_code = 200
+        text = '{"choices":[{"message":{"content":"fallback success"}}]}'
+
+        def json(self):
+            return {"choices": [{"message": {"content": "fallback success"}}]}
+
+    def fake_post(url, headers, data, timeout):
+        captured["data"] = data
+        return DummyResponse()
+
+    monkeypatch.setattr(zhiyi_image_text_module, "load_config", lambda: {
+        "base_url": "https://example.com",
+        "api_key": "secret",
+    })
+    monkeypatch.setattr(zhiyi_image_text_module.requests, "post", fake_post)
+    monkeypatch.setattr(
+        node,
+        "_image_tensor_to_data_url",
+        lambda _image, max_data_url_bytes: (
+            fallback_data_url,
+            {
+                "compression_fallback": True,
+                "budget_exceeded": True,
+                "data_url_bytes": len(fallback_data_url.encode("utf-8")),
+                "max_data_url_bytes": max_data_url_bytes,
+            },
+        ),
+    )
+
+    result = node.generate(
+        image=torch.zeros((1, 2, 2, 3)),
+        prompt="describe",
+        node_switch=0,
+    )
+
+    assert result == ("fallback success",)
+    assert len(captured["data"].encode("utf-8")) > zhiyi_image_text_module.MAX_REQUEST_BODY_BYTES
+    assert fallback_data_url in captured["data"]
+
+
+def test_zhiyi_image_text_fallback_preserves_upstream_http_error(monkeypatch):
+    node = ZhiYiImageTextNode()
+    fallback_data_url = "data:image/jpeg;base64," + ("A" * 50_000)
+
+    class DummyResponse:
+        ok = False
+        status_code = 413
+        text = "request entity too large"
+
+    monkeypatch.setattr(zhiyi_image_text_module, "load_config", lambda: {
+        "base_url": "https://example.com",
+        "api_key": "secret",
+    })
+    monkeypatch.setattr(
+        node,
+        "_image_tensor_to_data_url",
+        lambda _image, max_data_url_bytes: (
+            fallback_data_url,
+            {"compression_fallback": True},
+        ),
+    )
+    monkeypatch.setattr(
+        zhiyi_image_text_module.requests,
+        "post",
+        lambda *args, **kwargs: DummyResponse(),
+    )
+
+    with pytest.raises(RuntimeError, match="API 请求失败: 413"):
+        node.generate(
+            image=torch.zeros((1, 2, 2, 3)),
+            prompt="describe",
+            node_switch=0,
+        )
 
 
 def test_zhiyi_image_text_http_error_includes_response_body(monkeypatch):
@@ -1796,6 +1886,56 @@ def test_zhiyi_image_text_combo_sends_multiple_images_in_one_request(monkeypatch
         {"role": "user", "text": "describe both images", "image_count": 2},
     ]
     assert "data:image/jpeg;base64,IMG1" not in json.dumps(request_log, ensure_ascii=False)
+
+
+def test_zhiyi_image_text_combo_fallback_still_sends_over_budget_request(monkeypatch):
+    node = ZhiYiImageTextComboNode()
+    captured = {}
+    image = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
+    fallback_data_url = "data:image/jpeg;base64," + ("A" * 50_000)
+
+    class DummyResponse:
+        status_code = 200
+        text = '{"choices":[{"message":{"content":"fallback combo"}}]}'
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "fallback combo"}}]}
+
+    def fake_post(url, headers, data, timeout):
+        captured["data"] = data
+        return DummyResponse()
+
+    monkeypatch.setattr(zhiyi_image_text_combo_module, "load_config", lambda: {
+        "base_url": "https://example.com",
+        "api_key": "secret",
+    })
+    monkeypatch.setattr(zhiyi_image_text_combo_module.requests, "post", fake_post)
+    monkeypatch.setattr(
+        node,
+        "_image_tensor_to_data_url",
+        lambda _image, max_data_url_bytes: (
+            fallback_data_url,
+            {
+                "compression_fallback": True,
+                "budget_exceeded": True,
+                "data_url_bytes": len(fallback_data_url.encode("utf-8")),
+                "max_data_url_bytes": max_data_url_bytes,
+            },
+        ),
+    )
+
+    text, _log = node.generate(
+        max_concurrency=1,
+        retry_count=0,
+        combo_1={"images": [image], "prompts": ["describe"]},
+    )
+
+    assert text == "fallback combo"
+    assert len(captured["data"].encode("utf-8")) > zhiyi_image_text_module.MAX_REQUEST_BODY_BYTES
+    assert fallback_data_url in captured["data"]
 
 
 def test_zhiyi_image_text_combo_keeps_output_order_when_requests_finish_out_of_order(monkeypatch):
@@ -1963,8 +2103,10 @@ def test_zhiyi_image_text_large_image_request_stays_under_48kb_and_is_valid_jpeg
         captured.update(url=url, headers=headers, data=data, timeout=timeout)
         return DummyResponse()
 
-    def capture_serialized_body(payload):
-        result = original_serialize_request_body(payload)
+    def capture_serialized_body(payload, allow_over_budget=False):
+        result = original_serialize_request_body(
+            payload, allow_over_budget=allow_over_budget
+        )
         captured["serialized_body"] = result[0]
         return result
 

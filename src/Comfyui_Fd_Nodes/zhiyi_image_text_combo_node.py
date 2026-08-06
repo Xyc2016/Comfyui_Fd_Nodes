@@ -333,7 +333,13 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
 
                 messages = self._build_messages(prompt, data_urls, system_prompt)
                 payload = self._build_request_payload(messages, temperature, max_tokens)
-                request_body, request_body_bytes = self._serialize_request_body(payload)
+                request_body, request_body_bytes = self._serialize_request_body(
+                    payload,
+                    allow_over_budget=any(
+                        info.get("compression_fallback", False)
+                        for info in image_infos
+                    ),
+                )
                 for image_index, image_info in enumerate(image_infos, start=1):
                     image_info["combo"] = combo_slot
                     image_info["image"] = image_index

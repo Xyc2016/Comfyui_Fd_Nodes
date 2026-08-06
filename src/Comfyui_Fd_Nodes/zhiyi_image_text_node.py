@@ -120,7 +120,6 @@ class ZhiYiImageTextNode:
         source_size = source_img.size
         resized_by_pixels = source_size != original_size
         current_long_edge = max(source_size)
-        best_result = None
 
         while True:
             candidate_img = self._resize_to_long_edge(source_img, current_long_edge)
@@ -142,20 +141,37 @@ class ZhiYiImageTextNode:
                     "max_data_url_bytes": max_data_url_bytes,
                     "resized": candidate_img.size != original_size,
                 }
-                best_result = (data_url, info)
                 if data_url_bytes <= max_data_url_bytes:
-                    return best_result
+                    return data_url, info
 
             if current_long_edge <= MIN_IMAGE_LONG_EDGE:
                 break
             current_long_edge = max(MIN_IMAGE_LONG_EDGE, int(current_long_edge * IMAGE_RESIZE_FACTOR))
 
-        _, info = best_result
-        raise RuntimeError(
-            "图生文输入图片压缩后仍超过可用传输预算: "
-            f"{info['data_url_bytes']} bytes > {max_data_url_bytes} bytes; "
-            "请缩短 prompt 或降低输入图片分辨率后重试"
+        data_url, image_bytes = self._encode_jpeg_data_url(original_img, JPEG_QUALITY_STEPS[0])
+        data_url_bytes = len(data_url.encode("utf-8"))
+        info = {
+            "original_size": original_size,
+            "final_size": original_size,
+            "original_pixels": original_pixels,
+            "final_pixels": original_pixels,
+            "max_total_pixels": MAX_IMAGE_TOTAL_PIXELS,
+            "resized_by_pixels": False,
+            "mime_type": "image/jpeg",
+            "quality": JPEG_QUALITY_STEPS[0],
+            "image_bytes": image_bytes,
+            "data_url_bytes": data_url_bytes,
+            "max_data_url_bytes": max_data_url_bytes,
+            "resized": False,
+            "compression_fallback": True,
+            "budget_exceeded": True,
+        }
+        logger.warning(
+            "图生文输入图片无法压缩到传输预算内，回退原尺寸继续请求: %s bytes > %s bytes",
+            data_url_bytes,
+            max_data_url_bytes,
         )
+        return data_url, info
 
     def _build_messages(self, prompt, data_urls, system_prompt=""):
         messages = []
@@ -186,10 +202,10 @@ class ZhiYiImageTextNode:
             "max_tokens": max_tokens,
         }
 
-    def _serialize_request_body(self, payload):
+    def _serialize_request_body(self, payload, allow_over_budget=False):
         request_body = json.dumps(payload)
         request_body_bytes = len(request_body.encode("utf-8"))
-        if request_body_bytes > MAX_REQUEST_BODY_BYTES:
+        if request_body_bytes > MAX_REQUEST_BODY_BYTES and not allow_over_budget:
             raise RuntimeError(
                 "图生文请求体超过 48000 字节限制: "
                 f"{request_body_bytes} bytes > {MAX_REQUEST_BODY_BYTES} bytes; "
@@ -273,7 +289,10 @@ class ZhiYiImageTextNode:
         )
         messages = self._build_messages(prompt, [data_url], system_prompt)
         payload = self._build_request_payload(messages, temperature, max_tokens)
-        request_body, request_body_bytes = self._serialize_request_body(payload)
+        request_body, request_body_bytes = self._serialize_request_body(
+            payload,
+            allow_over_budget=image_info.get("compression_fallback", False),
+        )
         image_info["request_body_bytes"] = request_body_bytes
         image_info["max_request_body_bytes"] = MAX_REQUEST_BODY_BYTES
         logger.info("ZhiYi image-to-text encoded image: %s", image_info)
