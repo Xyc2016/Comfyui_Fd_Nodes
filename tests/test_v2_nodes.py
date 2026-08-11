@@ -22,7 +22,7 @@ from src.Comfyui_Fd_Nodes.v2.constants import (
     BODY_CLASS_OPTIONS,
     CLOTHES_CLASS_OPTIONS,
     FASHION_CLASS_OPTIONS,
-    _build_class_options,
+    _validate_class_tables,
 )
 from src.Comfyui_Fd_Nodes.v2.controlnet_aux_v2_node import (
     ZhiYiDepthAnythingV2PreprocessorNodeV2,
@@ -238,7 +238,7 @@ def test_env_options_shape():
     assert CUSTOM_ENV == "custom"
 
 
-def test_env_combo_is_object_options():
+def test_env_combo_is_string_options():
     for cls in V2_CLASSES:
         options, config = cls.INPUT_TYPES()["required"]["env"]
         assert all(isinstance(option, str) for option in options)
@@ -264,10 +264,9 @@ def test_class_options_match_classes():
         (FASHION_CLASS_OPTIONS, FASHION_CLASSES),
         (BODY_CLASS_OPTIONS, BODY_CLASSES),
     ]:
-        values = [option["value"] for option in options]
-        assert set(values) == set(classes)
-        assert len(values) == len(set(values)), "value 重复"
-        assert all(option["text"] for option in options)
+        assert options == list(classes)
+        assert len(options) == len(set(options)), "value 重复"
+        assert all(isinstance(option, str) and option for option in options)
 
 
 def test_class_defaults_are_valid():
@@ -820,15 +819,11 @@ def test_custom_env_falls_back_to_fd_var(monkeypatch):
 
 
 def test_class_widgets_have_multiselect_markers():
-    for cls, _ in [
-        (ZhiYiClothesSegmentNodeV2, CLOTHES_CLASS_OPTIONS),
-        (ZhiYiFashionSegmentNodeV2, FASHION_CLASS_OPTIONS),
-        (ZhiYiBodySegmentNodeV2, BODY_CLASS_OPTIONS),
-    ]:
+    for cls in [ZhiYiClothesSegmentNodeV2, ZhiYiFashionSegmentNodeV2, ZhiYiBodySegmentNodeV2]:
         options, config = cls.INPUT_TYPES()["required"]["classes"]
         assert config["multiselect"] is True
         assert config["multi_select"]
-        assert all(isinstance(o, dict) and {"text", "value"} <= set(o) for o in options)
+        assert all(isinstance(o, str) and o for o in options)
 
 
 def test_sam2_v2_node_switch_batch_mask(monkeypatch):
@@ -936,12 +931,12 @@ def test_sam2_v2_invalid_color_zero_requests(monkeypatch):
         )
 
 
-def test_class_options_rejects_bad_tables():
+def test_class_tables_reject_bad_tables():
     with pytest.raises(RuntimeError, match="缺少翻译"):
-        _build_class_options(["a", "b"], {"a": "甲"})
+        _validate_class_tables(["a", "b"], {"a": "甲"})
     with pytest.raises(RuntimeError, match="多余翻译"):
-        _build_class_options(["a"], {"a": "甲", "b": "乙"})
+        _validate_class_tables(["a"], {"a": "甲", "b": "乙"})
     with pytest.raises(RuntimeError, match="类别重复"):
-        _build_class_options(["a", "a"], {"a": "甲"})
+        _validate_class_tables(["a", "a"], {"a": "甲"})
     with pytest.raises(RuntimeError, match="空翻译"):
-        _build_class_options(["a"], {"a": ""})
+        _validate_class_tables(["a"], {"a": ""})

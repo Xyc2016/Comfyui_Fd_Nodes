@@ -90,7 +90,7 @@ BODY_CLASS_LABELS = {
 }
 
 
-def _build_class_options(classes, labels):
+def _validate_class_tables(classes, labels):
     missing = set(classes) - set(labels)
     extra = set(labels) - set(classes)
     duplicates = [name for name in classes if classes.count(name) > 1]
@@ -106,12 +106,14 @@ def _build_class_options(classes, labels):
         problems.append(f"空翻译: {sorted(blanks)}")
     if problems:
         raise RuntimeError("类别翻译表不一致: " + "; ".join(problems))
-    return [
-        {"text": labels[class_name], "value": class_name}
-        for class_name in classes
-    ]
 
 
-CLOTHES_CLASS_OPTIONS = _build_class_options(CLOTHES_CLASSES, CLOTHES_CLASS_LABELS)
-FASHION_CLASS_OPTIONS = _build_class_options(FASHION_CLASSES, FASHION_CLASS_LABELS)
-BODY_CLASS_OPTIONS = _build_class_options(BODY_CLASSES, BODY_CLASS_LABELS)
+_validate_class_tables(CLOTHES_CLASSES, CLOTHES_CLASS_LABELS)
+_validate_class_tables(FASHION_CLASSES, FASHION_CLASS_LABELS)
+_validate_class_tables(BODY_CLASSES, BODY_CLASS_LABELS)
+
+# 多选下拉使用纯英文字符串：ComfyUI 0.6.0 后端校验会原样提交对象，
+# 对象 options 会导致 "Value not in list" 校验失败。中文标签需前端扩展映射。
+CLOTHES_CLASS_OPTIONS = list(CLOTHES_CLASSES)
+FASHION_CLASS_OPTIONS = list(FASHION_CLASSES)
+BODY_CLASS_OPTIONS = list(BODY_CLASSES)
