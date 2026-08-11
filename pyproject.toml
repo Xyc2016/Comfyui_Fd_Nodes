@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "Comfyui_Fd_Nodes"
-version = "53.8.38"  # 999开头的版本是debug版
+version = "53.8.39"  # 999开头的版本是debug版
 description = "Custom nodes for fd project"
 authors = [
   {name = "xuyucai", email = "986327386@qq.com"}
