@@ -1,4 +1,12 @@
-"""V2 节点类别中文翻译表与多选下拉 options。"""
+"""V2 节点类别中文翻译表（参考数据，供文档与后续前端 label 映射使用）。
+
+ComfyUI 0.6.0 后端 combo 校验（execution.py）只对"input_type 是选项列表"的老式
+写法做成员判断；新式写法 ("COMBO", {"options": [...]}) 的 input_type 是字符串，
+不校验列表值，多选下拉提交的 {"__value__": [...]} 会被解包成列表直接传给节点。
+但多选下拉对 {text, value} 对象 options 会原样提交对象（前端 optionValue 机制
+只作用于单选下拉），因此 classes 下拉使用纯英文 options，中文翻译表保留用于
+维护一致性，后续如需中文显示需配前端 label 映射。
+"""
 
 from ..zhiyi_rmbg_segment_node import BODY_CLASSES, CLOTHES_CLASSES, FASHION_CLASSES
 
@@ -111,9 +119,3 @@ def _validate_class_tables(classes, labels):
 _validate_class_tables(CLOTHES_CLASSES, CLOTHES_CLASS_LABELS)
 _validate_class_tables(FASHION_CLASSES, FASHION_CLASS_LABELS)
 _validate_class_tables(BODY_CLASSES, BODY_CLASS_LABELS)
-
-# 多选下拉使用纯英文字符串：ComfyUI 0.6.0 后端校验会原样提交对象，
-# 对象 options 会导致 "Value not in list" 校验失败。中文标签需前端扩展映射。
-CLOTHES_CLASS_OPTIONS = list(CLOTHES_CLASSES)
-FASHION_CLASS_OPTIONS = list(FASHION_CLASSES)
-BODY_CLASS_OPTIONS = list(BODY_CLASSES)

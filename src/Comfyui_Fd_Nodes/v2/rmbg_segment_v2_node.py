@@ -15,7 +15,6 @@ from ..zhiyi_rmbg_segment_node import (
     FASHION_CLASSES,
     _RmbgSegmentApiBase,
 )
-from .constants import BODY_CLASS_OPTIONS, CLOTHES_CLASS_OPTIONS, FASHION_CLASS_OPTIONS
 from .env import resolve_service_env, service_env_options
 
 
@@ -127,9 +126,9 @@ class ZhiYiClothesSegmentNodeV2(_RmbgSegmentApiBase):
                     "multiline": False,
                     "tooltip": "衣物语义分割接口地址，例如 http://host:8003/v1/segment/clothes；仅环境=自定义时使用",
                 }),
-                "classes": (CLOTHES_CLASS_OPTIONS, {
+                "classes": ("COMBO", {
+                    "options": list(CLOTHES_CLASSES),
                     "default": ["Upper-clothes"],
-                    "multiselect": True,
                     "multi_select": {"placeholder": "选择类别", "chip": True},
                     "tooltip": "多选类别；清空选择则使用服务默认类别",
                 }),
@@ -222,9 +221,9 @@ class ZhiYiFashionSegmentNodeV2(_RmbgSegmentApiBase):
                     "multiline": False,
                     "tooltip": "时尚单品分割接口地址，例如 http://host:8003/v1/segment/fashion；仅环境=自定义时使用",
                 }),
-                "classes": (FASHION_CLASS_OPTIONS, {
+                "classes": ("COMBO", {
+                    "options": list(FASHION_CLASSES),
                     "default": ["shirt, blouse"],
-                    "multiselect": True,
                     "multi_select": {"placeholder": "选择类别", "chip": True},
                     "tooltip": "多选类别（类别名中的逗号需按原样保留）；清空选择则使用服务默认类别",
                 }),
@@ -317,9 +316,9 @@ class ZhiYiBodySegmentNodeV2(_RmbgSegmentApiBase):
                     "multiline": False,
                     "tooltip": "身体部位分割接口地址，例如 http://host:8003/v1/segment/body；仅环境=自定义时使用",
                 }),
-                "classes": (BODY_CLASS_OPTIONS, {
+                "classes": ("COMBO", {
+                    "options": list(BODY_CLASSES),
                     "default": ["Face", "Hair", "Top-clothes", "Bottom-clothes"],
-                    "multiselect": True,
                     "multi_select": {"placeholder": "选择类别", "chip": True},
                     "tooltip": "多选类别；清空选择则使用服务默认类别",
                 }),

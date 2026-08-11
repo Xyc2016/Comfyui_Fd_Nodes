@@ -18,12 +18,7 @@ from src.Comfyui_Fd_Nodes.config import (
 )
 from src.Comfyui_Fd_Nodes.nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 from src.Comfyui_Fd_Nodes.v2 import controlnet_aux_v2_node as aux_v2_module
-from src.Comfyui_Fd_Nodes.v2.constants import (
-    BODY_CLASS_OPTIONS,
-    CLOTHES_CLASS_OPTIONS,
-    FASHION_CLASS_OPTIONS,
-    _validate_class_tables,
-)
+from src.Comfyui_Fd_Nodes.v2.constants import _validate_class_tables
 from src.Comfyui_Fd_Nodes.v2.controlnet_aux_v2_node import (
     ZhiYiDepthAnythingV2PreprocessorNodeV2,
     ZhiYiDWPoseDetectNodeV2,
@@ -258,12 +253,15 @@ def test_env_defaults():
 # ---------- 4. 多选 options ----------
 
 
-def test_class_options_match_classes():
-    for options, classes in [
-        (CLOTHES_CLASS_OPTIONS, CLOTHES_CLASSES),
-        (FASHION_CLASS_OPTIONS, FASHION_CLASSES),
-        (BODY_CLASS_OPTIONS, BODY_CLASSES),
+def test_class_combo_options_match_classes():
+    for cls, classes in [
+        (ZhiYiClothesSegmentNodeV2, CLOTHES_CLASSES),
+        (ZhiYiFashionSegmentNodeV2, FASHION_CLASSES),
+        (ZhiYiBodySegmentNodeV2, BODY_CLASSES),
     ]:
+        input_type, config = cls.INPUT_TYPES()["required"]["classes"]
+        assert input_type == "COMBO"
+        options = config["options"]
         assert options == list(classes)
         assert len(options) == len(set(options)), "value 重复"
         assert all(isinstance(option, str) and option for option in options)
@@ -820,10 +818,10 @@ def test_custom_env_falls_back_to_fd_var(monkeypatch):
 
 def test_class_widgets_have_multiselect_markers():
     for cls in [ZhiYiClothesSegmentNodeV2, ZhiYiFashionSegmentNodeV2, ZhiYiBodySegmentNodeV2]:
-        options, config = cls.INPUT_TYPES()["required"]["classes"]
-        assert config["multiselect"] is True
+        input_type, config = cls.INPUT_TYPES()["required"]["classes"]
+        assert input_type == "COMBO"
         assert config["multi_select"]
-        assert all(isinstance(o, str) and o for o in options)
+        assert all(isinstance(o, str) and o for o in config["options"])
 
 
 def test_sam2_v2_node_switch_batch_mask(monkeypatch):
