@@ -11,6 +11,7 @@ from src.Comfyui_Fd_Nodes import zhiyi_controlnet_aux_node as aux_module
 from src.Comfyui_Fd_Nodes import zhiyi_dwpose_detect_node as dwpose_module
 from src.Comfyui_Fd_Nodes import zhiyi_rmbg_segment_node as rmbg_module
 from src.Comfyui_Fd_Nodes.config import (
+    CUSTOM_SERVICE_URL_PRESET,
     DWPOSE_SERVICE_ENVS,
     RMBG_SERVICE_ENVS,
     SAM2_SERVICE_ENVS,
@@ -31,6 +32,7 @@ from src.Comfyui_Fd_Nodes.v2.controlnet_aux_v2_node import (
 from src.Comfyui_Fd_Nodes.v2.env import (
     ENV_OPTIONS,
     CUSTOM_ENV,
+    normalize_env,
     resolve_service_env,
 )
 from src.Comfyui_Fd_Nodes.v2.rmbg_segment_v2_node import (
@@ -231,33 +233,26 @@ def test_input_types_business_params_match_old():
 
 
 def test_env_options_shape():
-    values = [option["value"] for option in ENV_OPTIONS]
-    assert values == ["gray", "dev", "custom"]
-    for option in ENV_OPTIONS:
-        assert set(option) == {"text", "value"}
-        assert option["text"]
+    assert ENV_OPTIONS == ["灰度环境", "开发环境", CUSTOM_SERVICE_URL_PRESET]
+    assert all(isinstance(option, str) for option in ENV_OPTIONS)
     assert CUSTOM_ENV == "custom"
 
 
 def test_env_combo_is_object_options():
     for cls in V2_CLASSES:
         options, config = cls.INPUT_TYPES()["required"]["env"]
-        assert all(isinstance(option, dict) and {"text", "value"} <= set(option) for option in options)
+        assert all(isinstance(option, str) for option in options)
 
 
 # ---------- 3. env 默认值 ----------
 
 
 def test_env_defaults():
-    rmbg_defaults = ["dev", "dev", "dev", "dev"]
-    for cls, default in zip(
-        [ZhiYiRMBGNodeV2, ZhiYiClothesSegmentNodeV2, ZhiYiFashionSegmentNodeV2, ZhiYiBodySegmentNodeV2],
-        rmbg_defaults,
-    ):
-        assert cls.INPUT_TYPES()["required"]["env"][1]["default"] == default
+    for cls in [ZhiYiRMBGNodeV2, ZhiYiClothesSegmentNodeV2, ZhiYiFashionSegmentNodeV2, ZhiYiBodySegmentNodeV2]:
+        assert cls.INPUT_TYPES()["required"]["env"][1]["default"] == "开发环境"
 
     for cls in [ZhiYiDWPoseDetectNodeV2, ZhiYiLineArtPreprocessorNodeV2, ZhiYiDepthAnythingV2PreprocessorNodeV2, ZhiYiSAM2SegmentNodeV2]:
-        assert cls.INPUT_TYPES()["required"]["env"][1]["default"] == "gray"
+        assert cls.INPUT_TYPES()["required"]["env"][1]["default"] == "灰度环境"
 
 
 # ---------- 4. 多选 options ----------
@@ -305,22 +300,40 @@ def test_switch_defaults_true():
 
 
 def test_resolve_service_env():
-    assert resolve_service_env("gray", DWPOSE_SERVICE_ENVS) == DWPOSE_SERVICE_ENVS["gray"]
-    assert resolve_service_env("dev", RMBG_SERVICE_ENVS) == RMBG_SERVICE_ENVS["dev"]
+    assert resolve_service_env("灰度环境", DWPOSE_SERVICE_ENVS) == DWPOSE_SERVICE_ENVS["gray"]
+    assert resolve_service_env("开发环境", RMBG_SERVICE_ENVS) == RMBG_SERVICE_ENVS["dev"]
     assert resolve_service_env("gray", SAM2_SERVICE_ENVS) == SAM2_SERVICE_ENVS["gray"]
     assert resolve_service_env("dev", SAM2_SERVICE_ENVS) == SAM2_SERVICE_ENVS["dev"]
     assert resolve_service_env(None, DWPOSE_SERVICE_ENVS) is None
-    assert resolve_service_env("custom", DWPOSE_SERVICE_ENVS) is None
     assert resolve_service_env("", DWPOSE_SERVICE_ENVS) is None
+    assert resolve_service_env(CUSTOM_SERVICE_URL_PRESET, DWPOSE_SERVICE_ENVS) is None
+    assert resolve_service_env("custom", DWPOSE_SERVICE_ENVS) is None
 
     with pytest.raises(RuntimeError, match="未知的 env: 不存在"):
         resolve_service_env("不存在", DWPOSE_SERVICE_ENVS)
 
-    with pytest.raises(RuntimeError, match="未知的 env"):
-        resolve_service_env({"text": "灰度环境", "value": "gray"}, DWPOSE_SERVICE_ENVS)
+    # 旧工作流里保存的 {text, value} 对象会被归一化后正常解析
+    assert resolve_service_env(
+        {"text": "灰度环境", "value": "gray"}, DWPOSE_SERVICE_ENVS
+    ) == DWPOSE_SERVICE_ENVS["gray"]
 
-    with pytest.raises(RuntimeError, match="custom"):
+    with pytest.raises(RuntimeError, match="自定义"):
         resolve_service_env("不存在", DWPOSE_SERVICE_ENVS)
+
+
+def test_normalize_env_legacy_forms():
+    assert normalize_env("灰度环境") == "gray"
+    assert normalize_env("开发环境") == "dev"
+    assert normalize_env(CUSTOM_SERVICE_URL_PRESET) == "custom"
+    assert normalize_env("gray") == "gray"
+    assert normalize_env("dev") == "dev"
+    assert normalize_env("custom") == "custom"
+    assert normalize_env(None) is None
+    assert normalize_env("") is None
+    with pytest.raises(RuntimeError):
+        normalize_env("不存在")
+    with pytest.raises(RuntimeError):
+        normalize_env(123)
 
 
 # ---------- 7. 环境 URL 解析（mock 请求） ----------

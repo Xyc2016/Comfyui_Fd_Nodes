@@ -19,7 +19,7 @@ class ZhiYiSAM2SegmentNodeV2(ZhiYiSAM2SegmentNode):
                 "images": ("IMAGE",),
                 "bboxes": ("BBOXES",),
                 "env": (service_env_options(), {
-                    "default": "gray",
+                    "default": "灰度环境",
                     "tooltip": "灰度/开发环境使用内置地址（忽略 service_url 与 FD_* 环境变量）；自定义使用 service_url",
                 }),
                 "service_url": ("STRING", {
