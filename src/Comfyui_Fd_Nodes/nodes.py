@@ -57,6 +57,18 @@ from .zhiyi_rmbg_segment_node import ZhiYiBodySegmentNode, ZhiYiClothesSegmentNo
 from .sam2_segment_node import ZhiYiSAM2SegmentNode
 from .zhiyi_controlnet_aux_node import ZhiYiDepthAnythingV2PreprocessorNode, ZhiYiLineArtPreprocessorNode
 from .zhiyi_dwpose_detect_node import ZhiYiDWPoseDetectNode
+from .v2.controlnet_aux_v2_node import (
+    ZhiYiDepthAnythingV2PreprocessorNodeV2,
+    ZhiYiDWPoseDetectNodeV2,
+    ZhiYiLineArtPreprocessorNodeV2,
+)
+from .v2.rmbg_segment_v2_node import (
+    ZhiYiBodySegmentNodeV2,
+    ZhiYiClothesSegmentNodeV2,
+    ZhiYiFashionSegmentNodeV2,
+    ZhiYiRMBGNodeV2,
+)
+from .v2.sam2_segment_v2_node import ZhiYiSAM2SegmentNodeV2
 from .zhiyi_qwen_detect_node import ZhiYiBBoxesToSAM2, ZhiYiQwenDetectNode
 from .pattern_extraction_node import PatternChooseBackgroundPair, PatternDualBackgroundToRGBA
 from .utils.gpt_image_size import resolution_to_image_generation_edit_size
@@ -912,6 +924,14 @@ NODE_CLASS_MAPPINGS = {
     "ZhiYiDWPoseDetectNode": ZhiYiDWPoseDetectNode,
     "ZhiYiLineArtPreprocessorNode": ZhiYiLineArtPreprocessorNode,
     "ZhiYiDepthAnythingV2PreprocessorNode": ZhiYiDepthAnythingV2PreprocessorNode,
+    "ZhiYiRMBGNodeV2": ZhiYiRMBGNodeV2,
+    "ZhiYiClothesSegmentNodeV2": ZhiYiClothesSegmentNodeV2,
+    "ZhiYiFashionSegmentNodeV2": ZhiYiFashionSegmentNodeV2,
+    "ZhiYiBodySegmentNodeV2": ZhiYiBodySegmentNodeV2,
+    "ZhiYiSAM2SegmentNodeV2": ZhiYiSAM2SegmentNodeV2,
+    "ZhiYiDWPoseDetectNodeV2": ZhiYiDWPoseDetectNodeV2,
+    "ZhiYiLineArtPreprocessorNodeV2": ZhiYiLineArtPreprocessorNodeV2,
+    "ZhiYiDepthAnythingV2PreprocessorNodeV2": ZhiYiDepthAnythingV2PreprocessorNodeV2,
     "ZhiYiQwenDetectNode": ZhiYiQwenDetectNode,
     "ZhiYiBBoxesToSAM2": ZhiYiBBoxesToSAM2,
     "PatternChooseBackgroundPair+": PatternChooseBackgroundPair,
@@ -951,6 +971,14 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ZhiYiDWPoseDetectNode": "知衣-DWPose姿态检测",
     "ZhiYiLineArtPreprocessorNode": "知衣-LineArt线稿预处理",
     "ZhiYiDepthAnythingV2PreprocessorNode": "知衣-DepthAnythingV2深度图预处理",
+    "ZhiYiRMBGNodeV2": "知衣-RMBG2.0背景去除 v2",
+    "ZhiYiClothesSegmentNodeV2": "知衣-衣物语义分割 v2",
+    "ZhiYiFashionSegmentNodeV2": "知衣-时尚单品分割 v2",
+    "ZhiYiBodySegmentNodeV2": "知衣-身体部位分割 v2",
+    "ZhiYiSAM2SegmentNodeV2": "知衣-SAM2抠图 v2",
+    "ZhiYiDWPoseDetectNodeV2": "知衣-DWPose姿态检测 v2",
+    "ZhiYiLineArtPreprocessorNodeV2": "知衣-LineArt线稿预处理 v2",
+    "ZhiYiDepthAnythingV2PreprocessorNodeV2": "知衣-DepthAnythingV2深度图预处理 v2",
     "ZhiYiQwenDetectNode": "知衣-Qwen目标检测",
     "ZhiYiBBoxesToSAM2": "知衣-BBox转SAM2格式",
     "PatternChooseBackgroundPair+": "🔧 Pattern Choose Background Pair",

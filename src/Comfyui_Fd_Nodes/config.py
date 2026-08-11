@@ -105,5 +105,18 @@ RMBG_SERVICE_URL_PRESETS = (
     ("10.1.0.230", "http://10.1.0.230:8003"),
 )
 
+DWPOSE_SERVICE_ENVS = {
+    "gray": "http://model-api-dwpose-svc.online-server-gray:8001",
+    "dev": "http://10.1.0.230:8003",
+}
+RMBG_SERVICE_ENVS = {
+    "gray": "http://model-api-dwpose-svc.online-server-gray:8001",
+    "dev": "http://10.1.0.230:8003",
+}
+SAM2_SERVICE_ENVS = {
+    "gray": "http://model-api-sam2-hiera-base-plus-svc.online-server-gray:8000",
+    "dev": "http://10.1.0.230:8002",
+}
+
 assert FD_LITELLM_BASE_URL, "FD_LITELLM_BASE_URL is not set"
 assert FD_LITELLM_API_KEY, "FD_LITELLM_API_KEY is not set"

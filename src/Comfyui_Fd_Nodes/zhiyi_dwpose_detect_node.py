@@ -179,6 +179,8 @@ class ZhiYiDWPoseDetectNode:
         detect_face,
         xinsr_stick_scaling,
         upscale_method,
+        return_pose_image=True,
+        return_openpose_json=True,
     ):
         if upscale_method not in UPSCALE_METHODS:
             raise RuntimeError(f"upscale_method 无效: {upscale_method}")
@@ -190,8 +192,8 @@ class ZhiYiDWPoseDetectNode:
             "detect_face": bool(detect_face),
             "xinsr_stick_scaling": bool(xinsr_stick_scaling),
             "upscale_method": upscale_method,
-            "return_pose_image": True,
-            "return_openpose_json": True,
+            "return_pose_image": bool(return_pose_image),
+            "return_openpose_json": bool(return_openpose_json),
             "image_format": "png_base64",
         }
 
@@ -239,7 +241,13 @@ class ZhiYiDWPoseDetectNode:
             raise last_exc
         raise RuntimeError("请求失败")
 
-    def _post_pose(self, service_url, payload, timeout):
+    def _post_pose(
+        self,
+        service_url,
+        payload,
+        timeout,
+        require_pose_image=True,
+    ):
         response = self._request_with_retry(
             "POST",
             service_url,
@@ -256,7 +264,7 @@ class ZhiYiDWPoseDetectNode:
             raise RuntimeError(f"DWPose API 响应不是 JSON: {response.text[:500]}") from exc
         if not isinstance(data, dict):
             raise RuntimeError(f"DWPose API 响应格式错误: 期望 dict，实际 {type(data).__name__}")
-        if not data.get("pose_image"):
+        if require_pose_image and not data.get("pose_image"):
             raise RuntimeError("DWPose API 响应缺少 pose_image")
         return data
 
@@ -284,6 +292,8 @@ class ZhiYiDWPoseDetectNode:
         xinsr_stick_scaling,
         upscale_method,
         timeout,
+        return_pose_image=True,
+        return_openpose_json=True,
     ):
         original_image = self._image_tensor_to_rgb_pil(image_tensor)
         image_data_url = self._tensor_to_png_data_url(image_tensor)
@@ -295,20 +305,33 @@ class ZhiYiDWPoseDetectNode:
             detect_face,
             xinsr_stick_scaling,
             upscale_method,
+            return_pose_image,
+            return_openpose_json,
         )
         logger.info("Calling DWPose API idx=%s service_url=%s resolution=%s", idx, service_url, resolution)
-        result = self._post_pose(service_url, payload, timeout)
+        result = self._post_pose(
+            service_url,
+            payload,
+            timeout,
+            require_pose_image=return_pose_image,
+        )
 
-        pose_image = self._decode_png_data_url(result["pose_image"], "pose_image")
-        if pose_image.size != original_image.size:
-            pose_image = pose_image.resize(original_image.size, Image.Resampling.BILINEAR)
+        if return_pose_image and result.get("pose_image"):
+            pose_image = self._decode_png_data_url(result["pose_image"], "pose_image")
+            if pose_image.size != original_image.size:
+                pose_image = pose_image.resize(original_image.size, Image.Resampling.BILINEAR)
+            pose_image_tensor = self._pil_to_image_tensor(pose_image)
+        else:
+            pose_image_tensor = image_tensor
 
         openpose_json = result.get("openpose_json")
         if not isinstance(openpose_json, dict):
             openpose_json = {}
+        if not return_openpose_json:
+            openpose_json = []
 
         return {
-            "pose_image": self._pil_to_image_tensor(pose_image),
+            "pose_image": pose_image_tensor,
             "openpose_json": openpose_json,
             "info": {
                 "index": idx,

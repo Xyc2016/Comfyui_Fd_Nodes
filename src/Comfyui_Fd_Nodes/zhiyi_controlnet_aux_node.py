@@ -170,7 +170,13 @@ class _ControlNetAuxApiBase:
             raise last_exc
         raise RuntimeError("请求失败")
 
-    def _post_preprocess(self, service_url, payload, timeout):
+    def _post_preprocess(
+        self,
+        service_url,
+        payload,
+        timeout,
+        require_processed_image=True,
+    ):
         response = self._request_with_retry(
             "POST",
             service_url,
@@ -187,7 +193,7 @@ class _ControlNetAuxApiBase:
             raise RuntimeError(f"ControlNet 预处理 API 响应不是 JSON: {response.text[:500]}") from exc
         if not isinstance(data, dict):
             raise RuntimeError(f"ControlNet 预处理 API 响应格式错误: 期望 dict，实际 {type(data).__name__}")
-        if not data.get("processed_image"):
+        if require_processed_image and not data.get("processed_image"):
             raise RuntimeError("ControlNet 预处理 API 响应缺少 processed_image")
         return data
 
@@ -257,14 +263,23 @@ class _ControlNetAuxApiBase:
         )
         payload.update(payload_extra["extra"])
         logger.info("Calling %s API idx=%s service_url=%s resolution=%s", payload_extra["label"], idx, service_url, payload_extra["resolution"])
-        result = self._post_preprocess(service_url, payload, timeout)
+        result = self._post_preprocess(
+            service_url,
+            payload,
+            timeout,
+            require_processed_image=payload.get("return_image", True),
+        )
 
-        processed_image = self._decode_png_data_url(result["processed_image"], "processed_image")
-        if processed_image.size != original_image.size:
-            processed_image = processed_image.resize(original_image.size, Image.Resampling.BILINEAR)
+        if result.get("processed_image"):
+            processed_image = self._decode_png_data_url(result["processed_image"], "processed_image")
+            if processed_image.size != original_image.size:
+                processed_image = processed_image.resize(original_image.size, Image.Resampling.BILINEAR)
+            processed_image_tensor = self._pil_to_image_tensor(processed_image)
+        else:
+            processed_image_tensor = image_tensor
 
         return {
-            "image": self._pil_to_image_tensor(processed_image),
+            "image": processed_image_tensor,
             "info": {
                 "index": idx,
                 "request_id": result.get("request_id"),
