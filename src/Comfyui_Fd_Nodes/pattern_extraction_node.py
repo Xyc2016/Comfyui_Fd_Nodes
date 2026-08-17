@@ -376,6 +376,30 @@ def _apply_alpha_to_rgba(rgba, alpha_mask):
     return result
 
 
+def _mask_tensor_to_pil(alpha_mask, size=None):
+    """Convert a ComfyUI MASK tensor to a PIL 'L' image.
+
+    ComfyUI masks are usually float tensors in [0, 1] with shape (B, H, W)
+    or (H, W).  Accept both and tolerate masks that are already in uint8
+    [0, 255] range.
+    """
+    if alpha_mask.ndim == 4 and alpha_mask.shape[1] == 1:
+        alpha_mask = alpha_mask[:, 0, :, :]
+    if alpha_mask.ndim == 4 and alpha_mask.shape[-1] == 1:
+        alpha_mask = alpha_mask[..., 0]
+    if alpha_mask.ndim == 3:
+        alpha_mask = alpha_mask[0]
+    mask_np = alpha_mask.detach().cpu().numpy().astype(np.float32)
+    if mask_np.max() > 1.0:
+        mask_np = mask_np / 255.0
+    mask_np = np.clip(mask_np, 0.0, 1.0)
+    mask_uint8 = np.round(mask_np * 255.0).astype(np.uint8)
+    mask_image = Image.fromarray(mask_uint8, mode="L")
+    if size is not None and mask_image.size != size:
+        mask_image = mask_image.resize(size, Image.BILINEAR)
+    return mask_image
+
+
 def _build_unified_rgba(rgba_soft, rgba_agreement, rgba_clean):
     soft = np.asarray(rgba_soft.convert("RGBA")).astype(np.float32)
     agreement = np.asarray(rgba_agreement.convert("RGBA")).astype(np.float32)
@@ -453,7 +477,7 @@ def generate_rgba_from_dual_background_images(img_a, img_b, sample_span=24, alph
         "sample_span": int(sample_span),
         "alpha_floor": float(alpha_floor),
     }
-    return final_rgba, final_alpha, meta
+    return final_rgba, final_alpha, meta, rgba_soft, rgba_agreement
 
 
 class PatternChooseBackgroundPair:
@@ -498,8 +522,16 @@ class PatternDualBackgroundToRGBA:
             }
         }
 
-    RETURN_TYPES = ("IMAGE", "MASK", "STRING")
-    RETURN_NAMES = ("rgba_image", "alpha_mask", "meta_json")
+    RETURN_TYPES = ("IMAGE", "MASK", "STRING", "IMAGE", "IMAGE", "IMAGE", "MASK")
+    RETURN_NAMES = (
+        "rgba_image",
+        "alpha_mask",
+        "meta_json",
+        "rgba_soft",
+        "rgba_agreement",
+        "preferred_rgba",
+        "preferred_alpha_mask",
+    )
     FUNCTION = "execute"
     CATEGORY = "essentials/pattern extraction"
 
@@ -508,13 +540,15 @@ class PatternDualBackgroundToRGBA:
         rgba_list = []
         alpha_list = []
         meta_list = []
+        rgba_soft_list = []
+        rgba_agreement_list = []
 
         for i in range(batch_size):
             frame_a = image_a[min(i, image_a.shape[0] - 1): min(i, image_a.shape[0] - 1) + 1]
             frame_b = image_b[min(i, image_b.shape[0] - 1): min(i, image_b.shape[0] - 1) + 1]
             pil_a = _image_tensor_to_pil(frame_a)
             pil_b = _image_tensor_to_pil(frame_b)
-            rgba_image, alpha_mask, meta = generate_rgba_from_dual_background_images(
+            rgba_image, alpha_mask, meta, rgba_soft, rgba_agreement = generate_rgba_from_dual_background_images(
                 pil_a,
                 pil_b,
                 sample_span=sample_span,
@@ -528,19 +562,84 @@ class PatternDualBackgroundToRGBA:
             rgba_list.append(_pil_to_image_tensor(rgba_image))
             alpha_list.append(_mask_to_tensor(alpha_mask))
             meta_list.append(meta)
+            rgba_soft_list.append(_pil_to_image_tensor(rgba_soft))
+            rgba_agreement_list.append(_pil_to_image_tensor(rgba_agreement))
 
         rgba_batch = torch.cat(rgba_list, dim=0)
         alpha_batch = torch.cat(alpha_list, dim=0)
-        return (rgba_batch, alpha_batch, json.dumps(meta_list, ensure_ascii=False))
+        return (
+            rgba_batch,
+            alpha_batch,
+            json.dumps(meta_list, ensure_ascii=False),
+            torch.cat(rgba_soft_list, dim=0),
+            torch.cat(rgba_agreement_list, dim=0),
+            rgba_batch,
+            alpha_batch,
+        )
+
+
+class PatternApplyAlphaToImage:
+    """Apply a ComfyUI MASK as the alpha channel of an image.
+
+    The node converts the input image to RGBA, replaces/sets the alpha
+    channel from the supplied mask, optionally zeros the RGB of fully
+    transparent pixels, and returns the composited RGBA image.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "alpha_mask": ("MASK",),
+                "zero_transparent_rgb": ("BOOLEAN", {"default": True}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("rgba_image",)
+    FUNCTION = "execute"
+    CATEGORY = "essentials/pattern extraction"
+
+    def execute(self, image, alpha_mask, zero_transparent_rgb=True):
+        if image.ndim == 3:
+            image = image.unsqueeze(0)
+        batch_size = image.shape[0]
+        output_frames = []
+
+        for i in range(batch_size):
+            frame = image[i : i + 1]
+            pil_image = _image_tensor_to_pil(frame).convert("RGBA")
+            frame_mask = alpha_mask
+            if alpha_mask.ndim == 3 and alpha_mask.shape[0] == batch_size:
+                frame_mask = alpha_mask[i : i + 1]
+            elif alpha_mask.ndim == 3 and alpha_mask.shape[0] > 1 and batch_size == 1:
+                frame_mask = alpha_mask[0:1]
+            mask_image = _mask_tensor_to_pil(frame_mask, size=pil_image.size)
+
+            result = pil_image.copy()
+            result.putalpha(mask_image)
+
+            if zero_transparent_rgb:
+                arr = np.array(result)
+                alpha_channel = arr[..., 3]
+                arr[alpha_channel == 0, :3] = 0
+                result = Image.fromarray(arr, mode="RGBA")
+
+            output_frames.append(_pil_to_image_tensor(result))
+
+        return (torch.cat(output_frames, dim=0),)
 
 
 PATTERN_CLASS_MAPPINGS = {
     "PatternChooseBackgroundPair+": PatternChooseBackgroundPair,
     "PatternDualBackgroundToRGBA+": PatternDualBackgroundToRGBA,
+    "PatternApplyAlphaToImage+": PatternApplyAlphaToImage,
 }
 
 
 PATTERN_NAME_MAPPINGS = {
     "PatternChooseBackgroundPair+": "🔧 Pattern Choose Background Pair",
     "PatternDualBackgroundToRGBA+": "🔧 Pattern Dual Background To RGBA",
+    "PatternApplyAlphaToImage+": "🔧 Pattern Apply Alpha To Image",
 }

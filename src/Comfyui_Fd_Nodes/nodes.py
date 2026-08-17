@@ -70,7 +70,7 @@ from .v2.rmbg_segment_v2_node import (
 )
 from .v2.sam2_segment_v2_node import ZhiYiSAM2SegmentNodeV2
 from .zhiyi_qwen_detect_node import ZhiYiBBoxesToSAM2, ZhiYiQwenDetectNode
-from .pattern_extraction_node import PatternChooseBackgroundPair, PatternDualBackgroundToRGBA
+from .pattern_extraction_node import PatternApplyAlphaToImage, PatternChooseBackgroundPair, PatternDualBackgroundToRGBA
 from .utils.gpt_image_size import resolution_to_image_generation_edit_size
 from .utils.seedream_image_size import (
     SEEDREAM_ASPECT_RATIOS,
@@ -936,6 +936,7 @@ NODE_CLASS_MAPPINGS = {
     "ZhiYiBBoxesToSAM2": ZhiYiBBoxesToSAM2,
     "PatternChooseBackgroundPair+": PatternChooseBackgroundPair,
     "PatternDualBackgroundToRGBA+": PatternDualBackgroundToRGBA,
+    "PatternApplyAlphaToImage+": PatternApplyAlphaToImage,
 }
 
 # A dictionary that contains the friendly/humanly readable titles for the nodes
@@ -983,4 +984,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ZhiYiBBoxesToSAM2": "知衣-BBox转SAM2格式",
     "PatternChooseBackgroundPair+": "🔧 Pattern Choose Background Pair",
     "PatternDualBackgroundToRGBA+": "🔧 Pattern Dual Background To RGBA",
+    "PatternApplyAlphaToImage+": "🔧 Pattern Apply Alpha To Image",
 }
