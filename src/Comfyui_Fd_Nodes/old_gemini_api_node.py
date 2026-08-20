@@ -179,7 +179,7 @@ class FD_GeminiImage(ComfyNodeABC):
                     IO.COMBO,
                     {
                         "default": "",
-                        "options": ["", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9"],
+                        "options": ["", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9", "9:21"],
                         "tooltip": "Optional aspect ratio for the generated image",
                     }
                 ),

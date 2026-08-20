@@ -47,7 +47,7 @@ class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
     """API 图生图测试 combo 节点 - 支持 AiStudio publish、LiteLLM GPT Image edits 与 Gemini image。"""
 
     MODELS = ["nano-banana-pro"]
-    ASPECT_RATIOS = ["", "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"]
+    ASPECT_RATIOS = ["", "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9", "9:21"]
     IMAGE_SIZES = ["4K", "2K", "1080P", "720P"]
     QUALITIES = ["low", "medium", "high"]
     API_TYPES = ["auto", "gpt_image", "gemini_image", "aistudio_publish"]

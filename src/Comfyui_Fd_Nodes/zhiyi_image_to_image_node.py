@@ -51,7 +51,7 @@ class ZhiYiImageToImageNode:
         "gemini-3-pro-image-preview-adobe",
     ]
 
-    ASPECT_RATIOS = ["", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9"]
+    ASPECT_RATIOS = ["", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9", "9:21"]
     IMAGE_SIZES = ["4K", "2K", "1080P", "720P"]
     SEED_MODES = ["随机种子", "固定种子"]
 
