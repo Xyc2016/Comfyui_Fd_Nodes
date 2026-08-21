@@ -242,6 +242,8 @@ class SeedreamImageClient:
     def _upload_images(self, image_tensors) -> List[str]:
         urls = []
         for idx, image_tensor in enumerate(image_tensors):
+            if image_tensor.ndim == 3:
+                image_tensor = image_tensor.unsqueeze(0)
             scaled = downscale_image_tensor(image_tensor, total_pixels=self.MAX_INPUT_PIXELS).squeeze(0)
             logger.info(
                 "Seedream image/edit input %s resolution: input=%s scaled=%s",

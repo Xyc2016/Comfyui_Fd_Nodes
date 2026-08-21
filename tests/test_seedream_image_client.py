@@ -136,6 +136,23 @@ def test_edit_image_with_urls_skips_upload():
     assert captured["body"]["image_url_list"] == ["https://oss.example.com/a.png"]
 
 
+def test_edit_image_accepts_three_dim_tensor_from_batch_iteration():
+    """回归：FD_SeedreamImage 直接传 4 维 tensor，enumerate 迭代出 3 维元素，
+    修复前会在 downscale_image_tensor 的 shape[3] 处抛 IndexError: tuple index out of range。"""
+    captured = []
+
+    def fake_post(url, headers, json, timeout):
+        captured.append(json)
+        return OkResponse({"status": True, "result_image_url": "https://example.com/result.png"})
+
+    client = make_client(request_post=fake_post, request_get=lambda url, timeout: OkResponse(b"x"))
+
+    images = [torch.zeros((2, 2, 3), dtype=torch.float32)]  # 3 维 (H, W, C)
+    _, _ = client.edit_image(image_tensors=images, prompt="p", model="m", size="2K", ratio="3:4")
+
+    assert len(captured[0]["image_url_list"]) == 1
+
+
 def test_invalid_size_raises_before_upload_or_post():
     uploaded = []
     posted = []
