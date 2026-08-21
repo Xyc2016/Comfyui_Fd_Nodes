@@ -55,6 +55,34 @@ def _derive_gpt_image_edit_url() -> str:
 
 FD_GPT_IMAGE_EDIT_URL = os.getenv("FD_GPT_IMAGE_EDIT_URL") or _derive_gpt_image_edit_url()
 
+FD_SEEDREAM_BACKEND = os.getenv("FD_SEEDREAM_BACKEND", "image_generation")
+
+
+def _derive_image_generate_url() -> str:
+    source_url = (FD_GEMINI_URL or "").strip() or FD_GPT_IMAGE_EDIT_URL
+    if "://" not in source_url:
+        source_url = f"http://{source_url}"
+
+    parsed = urlparse(source_url.rstrip("/"))
+    path = parsed.path.rstrip("/")
+    if not path:
+        path = "/image/generate"
+    elif path.endswith("/image/gemini_image"):
+        path = f"{path[:-len('/gemini_image')]}/generate"
+    elif path.endswith("/gemini_image"):
+        path = f"{path[:-len('/gemini_image')]}/image/generate"
+    elif path.endswith("/image/edit"):
+        path = f"{path[:-len('/edit')]}/generate"
+    elif path.endswith("/image"):
+        path = f"{path}/generate"
+    else:
+        path = f"{path}/image/generate"
+
+    return urlunparse((parsed.scheme, parsed.netloc, path, "", "", ""))
+
+
+FD_IMAGE_GENERATE_URL = os.getenv("FD_IMAGE_GENERATE_URL") or _derive_image_generate_url()
+
 FD_OSS_URL_PATH_PREFIX_BEFORE_GEN = os.getenv("FD_OSS_URL_PATH_PREFIX_BEFORE_GEN", "devops/comfyui/segment_img")
 FD_AISTUDIO_PUBLISH_URL = os.getenv("FD_AISTUDIO_PUBLISH_URL", "http://121.40.67.98:2003/api/tasks/publish")
 FD_REMOVE_BG_BY_MEITU_URL = os.getenv(

@@ -20,9 +20,6 @@ from .config import (
     FD_FLUX2KLEIN_URL,
     FD_FLUX2KLEIN_USERNAME,
     FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL,
-    FD_LITELLM_API_KEY,
-    FD_LITELLM_BASE_URL,
-    FD_OSS_URL_PATH_PREFIX_BEFORE_GEN,
     FD_OSS_URL_PATH_PREFIX_FLUX,
     FD_Z_IMAGE_TURBO_PASSWORD,
     FD_Z_IMAGE_TURBO_URL,
@@ -35,7 +32,7 @@ from .utils.common_util import (
     bytesio_to_image_tensor,
     downscale_image_tensor,
 )
-from .utils.error_utils import ERROR_TIMEOUT, normalize_error_message
+from .utils.error_utils import normalize_error_message
 from .utils.oss_client import upload_bytes_to_oss
 from .utils.webhook import webhook_send
 from .gpt_image_node import FD_GTPImage
@@ -75,8 +72,8 @@ from .utils.gpt_image_size import resolution_to_image_generation_edit_size
 from .utils.seedream_image_size import (
     SEEDREAM_ASPECT_RATIOS,
     SEEDREAM_IMAGE_SIZES,
-    resolution_to_seedream_size,
 )
+from .utils.seedream_image_client import get_default_seedream_image_client
 
 configure_default_logging()
 logger = logging.getLogger(__name__)
@@ -677,107 +674,28 @@ class FD_SeedreamImage(ComfyNodeABC):
         aspect_ratio: str = "1:1",
         **kwargs,
     ):
-        request_size = resolution_to_seedream_size(size, aspect_ratio)
-        body = {
-            "model": model,
-            "prompt": prompt,
-            "size": request_size,
-            "output_format": output_format,
-            "watermark": False,
-        }
-        if model == "doubao-seedream-5.0-lite":
-            body["sequential_image_generation"] = "disabled"
-
-        # Upload images to OSS if provided
-        if images is not None:
-            batch_size = images.shape[0]
-            image_url_list = []
-            for i in range(batch_size):
-                single_image = images[i : i + 1]
-                # original_image = single_image.squeeze()
-                # scaled_image = downscale_image_tensor(single_image, total_pixels=2048 * 2048).squeeze()
-                # logger.info(
-                #     "FD_SeedreamImage Image %s resolution: original=%s scaled=%s",
-                #     i,
-                #     tuple(original_image.shape),
-                #     tuple(scaled_image.shape),
-                # )
-                scaled_image = single_image.squeeze() # 现在是测试阶段，先不要downscale TODO: 到时候考虑改一下
-                image_np = (scaled_image.numpy() * 255).astype(np.uint8)
-                img = Image.fromarray(image_np)
-                img_byte_arr = BytesIO()
-                img.save(img_byte_arr, format="PNG")
-                img_byte_arr = img_byte_arr.getvalue()
-                file_oss_path = f"{FD_OSS_URL_PATH_PREFIX_BEFORE_GEN}/{bytes_calculate_hex_md5(img_byte_arr)}.png"
-                oss_file_url = upload_bytes_to_oss(file_oss_path, img_byte_arr)
-                print(f"upload {file_oss_path}")
-                image_url_list.append(oss_file_url)
-            body['image'] = image_url_list
-
-        if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
-            try:
-                print("Sending seedream webhook message...")
-                webhook_send(FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL, {
-                    "seedream_request": body,
-                })
-            except Exception:
-                pass
-
-        logger.info(f"Calling Seedream API with {body}")
-
-        response = None
+        client = get_default_seedream_image_client()
         try:
-            headers = {
-                "Authorization": f"Bearer {FD_LITELLM_API_KEY}",
-                "Content-Type": "application/json",
-            }
+            if images is not None:
+                image_bytesio, _result_url = client.edit_image(
+                    image_tensors=images,
+                    prompt=prompt,
+                    model=model,
+                    size=size,
+                    ratio=aspect_ratio,
+                    resize=True,
+                )
+            else:
+                image_bytesio, _result_url = client.generate_image(
+                    prompt=prompt,
+                    model=model,
+                    size=size,
+                    ratio=aspect_ratio,
+                    resize=True,
+                )
+        except RuntimeError as exc:
+            raise GenImageServiceError(normalize_error_message(exc)) from exc
 
-            response = requests.post(
-                url=f"{FD_LITELLM_BASE_URL}/v1/images/generations",
-                headers=headers,
-                json=body,
-                timeout=300,
-            )
-            response.raise_for_status()
-            result = response.json()
-            logger.info(f"Seedream API response: {result}")
-            result_url = result["data"][0]["url"]
-            image_response = requests.get(result_url, timeout=300)
-            image_response.raise_for_status()
-        except requests.exceptions.Timeout as exc:
-            raise GenImageServiceError(
-                normalize_error_message(exc, category=ERROR_TIMEOUT, fallback_detail="request timed out")
-            ) from exc
-        except requests.exceptions.HTTPError as exc:
-            error_response = exc.response
-            status_code = error_response.status_code if error_response is not None else "unknown"
-            response_text = error_response.text if error_response is not None else str(exc)
-            raise GenImageServiceError(
-                normalize_error_message(f"HTTP {status_code} from Seedream: {response_text}")
-            ) from exc
-        except requests.exceptions.RequestException as exc:
-            raise GenImageServiceError(
-                normalize_error_message(f"REQUEST_ERROR: {exc}")
-            ) from exc
-        except Exception as exc:
-            response_text = response.text[:500] if response is not None else ""
-            detail = f"UNEXPECTED_ERROR: {exc}"
-            if response_text:
-                detail = f"{detail}; response: {response_text}"
-            raise GenImageServiceError(normalize_error_message(detail)) from exc
-
-        if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
-            try:
-                print("Sending seedream webhook message...")
-                webhook_send(FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL, {
-                    "seedream_full": {
-                        "request": body,
-                        "response": result,
-                    }
-                })
-            except Exception:
-                pass
-        image_bytesio = BytesIO(image_response.content)
         output_image = bytesio_to_image_tensor(image_bytesio)
 
         return (output_image,)

@@ -21,7 +21,9 @@ from src.Comfyui_Fd_Nodes.utils.seedream_image_size import (
         ("2K", "1:1", "2048x2048"),
         ("2K", "3:4", "1728x2304"),
         ("3K", "21:9", "4704x2016"),
+        ("2K", "9:21", "1280x3072"),
         ("4K", "9:16", "3040x5504"),
+        ("4K", "9:21", "1648x3840"),
     ],
 )
 def test_seedream_size_maps_resolution_and_aspect_ratio_to_pixels(resolution, aspect_ratio, expected):
@@ -45,4 +47,4 @@ def test_seedream_size_rejects_unknown_resolution(resolution):
 
 def test_seedream_size_options_expose_1k():
     assert SEEDREAM_IMAGE_SIZES == ["4K", "3K", "2K", "1K"]
-    assert SEEDREAM_ASPECT_RATIOS == ["1:1", "3:4", "4:3", "16:9", "9:16", "3:2", "2:3", "21:9"]
+    assert SEEDREAM_ASPECT_RATIOS == ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9", "9:21"]

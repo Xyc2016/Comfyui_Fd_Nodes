@@ -4,27 +4,21 @@ import random
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
+from typing import Optional
 
 import numpy as np
-import requests
 from PIL import Image
 
-from .config import (
-    FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL,
-    FD_LITELLM_API_KEY,
-    FD_LITELLM_BASE_URL,
-    FD_OSS_URL_PATH_PREFIX_BEFORE_GEN,
-)
-from .utils.common_util import bytes_calculate_hex_md5, bytesio_to_image_tensor
-from .utils.error_utils import ERROR_TIMEOUT, normalize_error_message
+from .config import FD_OSS_URL_PATH_PREFIX_BEFORE_GEN
+from .utils.common_util import bytes_calculate_hex_md5, bytesio_to_image_tensor, downscale_image_tensor
+from .utils.error_utils import normalize_error_message
 from .utils.logging_utils import configure_default_logging
 from .utils.oss_client import upload_bytes_to_oss
+from .utils.seedream_image_client import SeedreamImageClient
 from .utils.seedream_image_size import (
     SEEDREAM_ASPECT_RATIOS,
     SEEDREAM_IMAGE_SIZES,
-    resolution_to_seedream_size,
 )
-from .utils.webhook import webhook_send
 
 configure_default_logging()
 logger = logging.getLogger(__name__)
@@ -40,7 +34,7 @@ class FD_SeedreamImageComboNode:
     SEED_MODES = ["随机种子", "固定种子"]
 
     def __init__(self):
-        pass
+        self._client = None
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -97,6 +91,11 @@ class FD_SeedreamImageComboNode:
     CATEGORY = "image/generation"
     OUTPUT_NODE = False
 
+    def _get_client(self) -> SeedreamImageClient:
+        if self._client is None:
+            self._client = SeedreamImageClient(webhook_name="seedream_combo")
+        return self._client
+
     def _tensor_to_png_bytes(self, image_tensor):
         if image_tensor.ndim == 4:
             image_tensor = image_tensor[0]
@@ -130,12 +129,13 @@ class FD_SeedreamImageComboNode:
     def _upload_images(self, image_tensors):
         urls = []
         for idx, image_tensor in enumerate(image_tensors):
+            scaled = downscale_image_tensor(image_tensor, total_pixels=4096 * 4096).squeeze(0)
             logger.info(
                 "FD_SeedreamImageCombo Image %s resolution: %s",
                 idx,
-                tuple(image_tensor.squeeze(0).shape),
+                tuple(scaled.shape),
             )
-            urls.append(self._upload_image(image_tensor))
+            urls.append(self._upload_image(scaled))
         return urls
 
     def _compose_prompt(self, prompt, system_prompt):
@@ -145,119 +145,36 @@ class FD_SeedreamImageComboNode:
             return f"{system_text}\n\n{prompt_text}"
         return system_text or prompt_text
 
-    def _build_body(self, model, prompt, image_urls, size, output_format, aspect_ratio="1:1"):
-        request_size = resolution_to_seedream_size(size, aspect_ratio)
-        body = {
-            "model": model,
-            "prompt": prompt,
-            "size": request_size,
-            "output_format": output_format,
-            "watermark": False,
-            "image": image_urls,
-        }
-        if model == "doubao-seedream-5.0-lite":
-            body["sequential_image_generation"] = "disabled"
-        return body
-
-    def _summarize_request_for_log(self, body, seed):
+    def _summarize_request_for_log(self, model, prompt, size, ratio, image_count, seed):
         return {
-            "model": body.get("model"),
-            "prompt": body.get("prompt"),
-            "sequential_image_generation": body.get("sequential_image_generation"),
-            "size": body.get("size"),
-            "output_format": body.get("output_format"),
-            "watermark": body.get("watermark"),
-            "image_count": len(body.get("image", [])),
+            "channel": model,
+            "prompt": prompt,
+            "size": size,
+            "ratio": ratio,
+            "image_count": image_count,
             "seed": seed,
             "note": "seed 仅用于批量任务记录，Seedream 请求体当前不传 seed 字段",
         }
 
-    def _extract_result_url(self, result):
-        data = result.get("data")
-        if not isinstance(data, list) or not data:
-            raise KeyError("响应缺少 data[0]")
-        first_item = data[0]
-        if not isinstance(first_item, dict):
-            raise KeyError("响应 data[0] 格式错误")
-        result_url = first_item.get("url")
-        if not result_url:
-            raise KeyError("响应缺少 data[0].url")
-        return result_url
-
-    def _download_result_image(self, result_url):
-        response = requests.get(result_url, timeout=300)
-        response.raise_for_status()
-        return bytesio_to_image_tensor(BytesIO(response.content))
-
-    def _single_request(self, base_url, api_key, model, prompt, image_urls, size, output_format, seed, aspect_ratio="1:1"):
+    def _single_request(self, model, prompt, image_urls, size, seed, aspect_ratio="1:1"):
         if not prompt or not prompt.strip():
             raise RuntimeError("prompt 不能为空")
         if not image_urls:
             raise RuntimeError("未提供图片 URL")
 
-        body = self._build_body(model, prompt.strip(), image_urls, size, output_format, aspect_ratio)
-        log_payload = self._summarize_request_for_log(body, seed)
-
-        if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
-            try:
-                webhook_send(FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL, {
-                    "seedream_combo_request": body,
-                })
-            except Exception:
-                pass
-
+        log_payload = self._summarize_request_for_log(model, prompt.strip(), size, aspect_ratio, len(image_urls), seed)
         logger.info("Calling Seedream combo API with payload=%s", log_payload)
 
-        response = None
-        try:
-            response = requests.post(
-                url=f"{base_url}/v1/images/generations",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=body,
-                timeout=300,
-            )
-            if not response.ok:
-                raise RuntimeError(f"API 请求失败: {response.status_code}\n{response.text[:1000]}")
-
-            result = response.json()
-            logger.info(
-                "Seedream combo API response summary: %s",
-                {
-                    "status_code": response.status_code,
-                    "data_count": len(result.get("data", [])) if isinstance(result.get("data"), list) else None,
-                    "result_url": (
-                        result.get("data", [{}])[0].get("url")
-                        if isinstance(result.get("data"), list) and result.get("data") and isinstance(result.get("data")[0], dict)
-                        else None
-                    ),
-                },
-            )
-            result_url = self._extract_result_url(result)
-
-            if FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL:
-                try:
-                    webhook_send(FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL, {
-                        "seedream_combo_full": {
-                            "request": body,
-                            "response": result,
-                        }
-                    })
-                except Exception:
-                    pass
-
-            return self._download_result_image(result_url), None, result_url
-        except requests.exceptions.Timeout as exc:
-            raise RuntimeError(
-                normalize_error_message(exc, category=ERROR_TIMEOUT, fallback_detail="request timed out")
-            ) from exc
-        except (KeyError, ValueError) as exc:
-            response_text = response.text[:500] if response is not None else ""
-            raise RuntimeError(normalize_error_message(f"解析响应失败: {exc}\n原始响应: {response_text}")) from exc
-        except Exception as exc:
-            raise RuntimeError(normalize_error_message(exc)) from exc
+        image_bytesio, result_url = self._get_client().edit_image_with_urls(
+            image_urls=image_urls,
+            prompt=prompt.strip(),
+            model=model,
+            size=size,
+            ratio=aspect_ratio,
+            resize=True,
+        )
+        image = bytesio_to_image_tensor(image_bytesio)
+        return image, None, result_url
 
     def _run_concurrent(self, tasks, max_workers, label="任务"):
         results = [None] * len(tasks)
@@ -294,13 +211,6 @@ class FD_SeedreamImageComboNode:
                  combo_1=None, combo_2=None, combo_3=None, combo_4=None,
                  combo_5=None, combo_6=None, combo_7=None, combo_8=None,
                  system_prompt="", aspect_ratio="1:1"):
-        final_base_url = (FD_LITELLM_BASE_URL or "").rstrip("/")
-        final_api_key = FD_LITELLM_API_KEY or ""
-        if not final_base_url or final_base_url == "https://your-api-base-url":
-            raise RuntimeError("未配置 base_url，请在环境变量 FD_LITELLM_BASE_URL 中设置")
-        if not final_api_key or final_api_key == "your-api-key":
-            raise RuntimeError("未配置 api_key，请在环境变量 FD_LITELLM_API_KEY 中设置")
-
         actual_seed = random.randint(0, 2147483647) if seed_mode == "随机种子" else seed
 
         combos = [c for c in [combo_1, combo_2, combo_3, combo_4, combo_5, combo_6, combo_7, combo_8] if c is not None]
@@ -343,13 +253,10 @@ class FD_SeedreamImageComboNode:
                             task_idx,
                             self._single_request,
                             (
-                                final_base_url,
-                                final_api_key,
                                 model,
                                 combined_prompt,
                                 image_urls,
                                 size,
-                                output_format,
                                 task_seed,
                                 aspect_ratio,
                             ),
@@ -372,7 +279,8 @@ class FD_SeedreamImageComboNode:
         results, log_lines, last_error_message = self._run_concurrent(tasks, max_concurrency, label="请求")
 
         successful = [result for result in results if result is not None]
-        header = f"总计: {len(successful)}/{len(tasks)} 成功, url={final_base_url}/v1/images/generations"
+        edit_url = self._get_client().edit_url
+        header = f"总计: {len(successful)}/{len(tasks)} 成功, url={edit_url}"
         if pre_errors:
             header += f"\n预处理失败 {len(pre_errors)} 个: " + "; ".join(pre_errors)
         log_lines.insert(0, header)
