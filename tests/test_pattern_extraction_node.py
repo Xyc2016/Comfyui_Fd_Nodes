@@ -11,6 +11,7 @@ from src.Comfyui_Fd_Nodes.pattern_extraction_node import (
     PatternChooseBackgroundPair,
     PatternDualBackgroundToRGBA,
 )
+from src.Comfyui_Fd_Nodes.zhiyi_rmbg_segment_node import _RmbgSegmentApiBase
 
 
 def _make_image_tensor(arr_uint8):
@@ -112,6 +113,45 @@ def test_nodes_registered_in_mappings():
 
     assert "PatternChooseBackgroundPair+" in nodes.NODE_DISPLAY_NAME_MAPPINGS
     assert "PatternDualBackgroundToRGBA+" in nodes.NODE_DISPLAY_NAME_MAPPINGS
+
+
+def test_rmbg_rgba_composition_preserves_foreground_and_alpha():
+    image = _make_image_tensor(np.array([
+        [[200, 100, 50], [10, 20, 30]],
+        [[40, 50, 60], [255, 240, 10]],
+    ], dtype=np.uint8))
+    mask = torch.tensor([[[1.0, 0.0], [0.5, 1.0]]])
+
+    rgba = _RmbgSegmentApiBase()._compose_rgba_image(image, mask)
+
+    assert rgba.shape == (1, 2, 2, 4)
+    np.testing.assert_allclose(rgba[0, 0, 0].numpy(), [200 / 255, 100 / 255, 50 / 255, 1.0])
+    np.testing.assert_allclose(rgba[0, 0, 1].numpy(), [0.0, 0.0, 0.0, 0.0])
+    np.testing.assert_allclose(rgba[0, 1, 0].numpy(), [40 / 255, 50 / 255, 60 / 255, 0.5])
+    np.testing.assert_allclose(rgba[0, 1, 1].numpy(), [1.0, 240 / 255, 10 / 255, 1.0])
+
+
+def test_rmbg_nodes_expose_rgba_output_without_changing_existing_ports():
+    from src.Comfyui_Fd_Nodes.zhiyi_rmbg_segment_node import (
+        ZhiYiBodySegmentNode,
+        ZhiYiClothesSegmentNode,
+        ZhiYiFashionSegmentNode,
+        ZhiYiRMBGNode,
+    )
+    from src.Comfyui_Fd_Nodes.v2.rmbg_segment_v2_node import (
+        ZhiYiBodySegmentNodeV2,
+        ZhiYiClothesSegmentNodeV2,
+        ZhiYiFashionSegmentNodeV2,
+        ZhiYiRMBGNodeV2,
+    )
+
+    for node_class in (
+        ZhiYiRMBGNode, ZhiYiClothesSegmentNode, ZhiYiFashionSegmentNode, ZhiYiBodySegmentNode,
+        ZhiYiRMBGNodeV2, ZhiYiClothesSegmentNodeV2, ZhiYiFashionSegmentNodeV2, ZhiYiBodySegmentNodeV2,
+    ):
+        assert node_class.RETURN_TYPES[:4] == ("IMAGE", "MASK", "IMAGE", "JSON")
+        assert node_class.RETURN_TYPES[4] == "IMAGE"
+        assert node_class.RETURN_NAMES[4] == "RGBA_IMAGE"
 
 
 def test_apply_alpha_to_image():

@@ -249,6 +249,23 @@ class _RmbgSegmentApiBase:
             mask = mask.unsqueeze(0)
         return mask.unsqueeze(-1).expand(-1, -1, -1, 3).to(dtype=torch.float32)
 
+    def _compose_rgba_image(self, image_tensor, mask_tensor):
+        """Create a straight-alpha RGBA tensor from an image and its mask."""
+        image_batch = self._normalize_image_batch(image_tensor)
+        if image_batch.shape[-1] < 3:
+            raise RuntimeError(f"图片 tensor shape 错误: {tuple(image_batch.shape)}")
+        rgb = image_batch[..., :3].to(dtype=torch.float32).clamp(0.0, 1.0)
+        mask = mask_tensor
+        if mask.ndim == 2:
+            mask = mask.unsqueeze(0)
+        if mask.ndim != 3 or mask.shape[0] != rgb.shape[0] or mask.shape[1:3] != rgb.shape[1:3]:
+            raise RuntimeError(
+                f"遮罩 tensor shape 与图片不匹配: image={tuple(rgb.shape)}, mask={tuple(mask.shape)}"
+            )
+        alpha = mask.to(dtype=torch.float32).clamp(0.0, 1.0)
+        rgba_rgb = rgb * (alpha.unsqueeze(-1) > 0).to(dtype=rgb.dtype)
+        return torch.cat((rgba_rgb, alpha.unsqueeze(-1)), dim=-1)
+
     def _compose_result_image(self, original_image_tensor, mask_tensor, background, background_color):
         original = self._image_tensor_to_rgb_pil(original_image_tensor)
         original_np = np.array(original).astype(np.float32) / 255.0
@@ -542,6 +559,7 @@ class _RmbgSegmentApiBase:
                 mask,
                 self._mask_to_image_tensor(mask),
                 json.dumps({"skipped": True, "reason": "node_switch"}, ensure_ascii=False),
+                self._compose_rgba_image(image_batch, mask),
             )
 
         selected_service_url = resolve_service_url_preset(
@@ -595,6 +613,10 @@ class _RmbgSegmentApiBase:
             torch.cat([result["mask"] for result in results], dim=0),
             torch.cat([result["mask_image"] for result in results], dim=0),
             json.dumps(info, ensure_ascii=False),
+            torch.cat(
+                [self._compose_rgba_image(image_tensors[idx], result["mask"]) for idx, result in enumerate(results)],
+                dim=0,
+            ),
         )
 
 
@@ -635,8 +657,8 @@ class ZhiYiRMBGNode(_RmbgSegmentApiBase):
             },
         }
 
-    RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "JSON")
-    RETURN_NAMES = ("IMAGE", "MASK", "MASK_IMAGE", "INFO")
+    RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "JSON", "IMAGE")
+    RETURN_NAMES = ("IMAGE", "MASK", "MASK_IMAGE", "INFO", "RGBA_IMAGE")
     FUNCTION = "remove_background"
     CATEGORY = "知衣/抠图"
     OUTPUT_NODE = False
@@ -728,8 +750,8 @@ class ZhiYiClothesSegmentNode(_RmbgSegmentApiBase):
             },
         }
 
-    RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "JSON")
-    RETURN_NAMES = ("IMAGE", "MASK", "MASK_IMAGE", "INFO")
+    RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "JSON", "IMAGE")
+    RETURN_NAMES = ("IMAGE", "MASK", "MASK_IMAGE", "INFO", "RGBA_IMAGE")
     FUNCTION = "segment"
     CATEGORY = "知衣/语义分割"
     OUTPUT_NODE = False
@@ -821,8 +843,8 @@ class ZhiYiFashionSegmentNode(_RmbgSegmentApiBase):
             },
         }
 
-    RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "JSON")
-    RETURN_NAMES = ("IMAGE", "MASK", "MASK_IMAGE", "INFO")
+    RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "JSON", "IMAGE")
+    RETURN_NAMES = ("IMAGE", "MASK", "MASK_IMAGE", "INFO", "RGBA_IMAGE")
     FUNCTION = "segment"
     CATEGORY = "知衣/语义分割"
     OUTPUT_NODE = False
@@ -920,8 +942,8 @@ class ZhiYiBodySegmentNode(_RmbgSegmentApiBase):
             },
         }
 
-    RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "JSON")
-    RETURN_NAMES = ("IMAGE", "MASK", "MASK_IMAGE", "INFO")
+    RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "JSON", "IMAGE")
+    RETURN_NAMES = ("IMAGE", "MASK", "MASK_IMAGE", "INFO", "RGBA_IMAGE")
     FUNCTION = "segment"
     CATEGORY = "知衣/语义分割"
     OUTPUT_NODE = False

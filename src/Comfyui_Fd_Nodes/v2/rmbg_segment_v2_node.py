@@ -55,8 +55,8 @@ class ZhiYiRMBGNodeV2(_RmbgSegmentApiBase):
             },
         }
 
-    RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "JSON")
-    RETURN_NAMES = ("IMAGE", "MASK", "MASK_IMAGE", "INFO")
+    RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "JSON", "IMAGE")
+    RETURN_NAMES = ("IMAGE", "MASK", "MASK_IMAGE", "INFO", "RGBA_IMAGE")
     FUNCTION = "remove_background"
     CATEGORY = "知衣/抠图"
     OUTPUT_NODE = False
@@ -150,8 +150,8 @@ class ZhiYiClothesSegmentNodeV2(_RmbgSegmentApiBase):
             },
         }
 
-    RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "JSON")
-    RETURN_NAMES = ("IMAGE", "MASK", "MASK_IMAGE", "INFO")
+    RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "JSON", "IMAGE")
+    RETURN_NAMES = ("IMAGE", "MASK", "MASK_IMAGE", "INFO", "RGBA_IMAGE")
     FUNCTION = "segment"
     CATEGORY = "知衣/语义分割"
     OUTPUT_NODE = False
@@ -245,8 +245,8 @@ class ZhiYiFashionSegmentNodeV2(_RmbgSegmentApiBase):
             },
         }
 
-    RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "JSON")
-    RETURN_NAMES = ("IMAGE", "MASK", "MASK_IMAGE", "INFO")
+    RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "JSON", "IMAGE")
+    RETURN_NAMES = ("IMAGE", "MASK", "MASK_IMAGE", "INFO", "RGBA_IMAGE")
     FUNCTION = "segment"
     CATEGORY = "知衣/语义分割"
     OUTPUT_NODE = False
@@ -346,8 +346,8 @@ class ZhiYiBodySegmentNodeV2(_RmbgSegmentApiBase):
             },
         }
 
-    RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "JSON")
-    RETURN_NAMES = ("IMAGE", "MASK", "MASK_IMAGE", "INFO")
+    RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "JSON", "IMAGE")
+    RETURN_NAMES = ("IMAGE", "MASK", "MASK_IMAGE", "INFO", "RGBA_IMAGE")
     FUNCTION = "segment"
     CATEGORY = "知衣/语义分割"
     OUTPUT_NODE = False
