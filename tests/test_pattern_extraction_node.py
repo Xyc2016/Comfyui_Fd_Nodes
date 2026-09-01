@@ -131,27 +131,18 @@ def test_rmbg_rgba_composition_preserves_foreground_and_alpha():
     np.testing.assert_allclose(rgba[0, 1, 1].numpy(), [1.0, 240 / 255, 10 / 255, 1.0])
 
 
-def test_rmbg_nodes_expose_rgba_output_without_changing_existing_ports():
-    from src.Comfyui_Fd_Nodes.zhiyi_rmbg_segment_node import (
-        ZhiYiBodySegmentNode,
-        ZhiYiClothesSegmentNode,
-        ZhiYiFashionSegmentNode,
-        ZhiYiRMBGNode,
-    )
-    from src.Comfyui_Fd_Nodes.v2.rmbg_segment_v2_node import (
-        ZhiYiBodySegmentNodeV2,
-        ZhiYiClothesSegmentNodeV2,
-        ZhiYiFashionSegmentNodeV2,
-        ZhiYiRMBGNodeV2,
-    )
+def test_rmbg_output_background_setting_controls_image_format():
+    image = _make_image_tensor(np.array([[[200, 100, 50], [10, 20, 30]]], dtype=np.uint8))
+    mask = torch.tensor([[[1.0, 0.0]]])
+    node = _RmbgSegmentApiBase()
 
-    for node_class in (
-        ZhiYiRMBGNode, ZhiYiClothesSegmentNode, ZhiYiFashionSegmentNode, ZhiYiBodySegmentNode,
-        ZhiYiRMBGNodeV2, ZhiYiClothesSegmentNodeV2, ZhiYiFashionSegmentNodeV2, ZhiYiBodySegmentNodeV2,
-    ):
-        assert node_class.RETURN_TYPES[:4] == ("IMAGE", "MASK", "IMAGE", "JSON")
-        assert node_class.RETURN_TYPES[4] == "IMAGE"
-        assert node_class.RETURN_NAMES[4] == "RGBA_IMAGE"
+    alpha = node._compose_output_image(image, mask, "Alpha", "#222222")
+    color = node._compose_output_image(image, mask, "Color", "#112233")
+
+    assert alpha.shape == (1, 1, 2, 4)
+    np.testing.assert_allclose(alpha[0, 0, 1].numpy(), [0.0, 0.0, 0.0, 0.0])
+    assert color.shape == (1, 1, 2, 3)
+    np.testing.assert_allclose(color[0, 0, 1].numpy(), [17 / 255, 34 / 255, 51 / 255])
 
 
 def test_apply_alpha_to_image():
