@@ -156,7 +156,34 @@ def test_gpt_nodes_keep_legacy_widget_order():
     assert list(multi_inputs["optional"])[-2:] == ["resize", "size_override"]
 
 
-def test_fd_gtp_image_passes_resize_to_client(monkeypatch):
+GPT_IMAGE_MODELS = [
+    "gpt-image-2",
+    "gpt-image-2.5",
+]
+
+
+@pytest.mark.parametrize("node_class", [FD_GTPImage, FD_GPTImageComboNode, FD_GPTMultiImage])
+def test_gpt_nodes_model_options_and_default(node_class):
+    model_type, model_config = node_class.INPUT_TYPES()["required"]["model"]
+    options = model_config["options"] if node_class is FD_GTPImage else model_type
+    assert options == GPT_IMAGE_MODELS
+    assert model_config["default"] == "gpt-image-2"
+
+
+GPT_IMAGE_QUALITIES = ["low", "medium", "high", "xhigh", "max"]
+
+
+@pytest.mark.parametrize("node_class", [FD_GTPImage, FD_GPTImageComboNode, FD_GPTMultiImage])
+def test_gpt_nodes_quality_options_and_default(node_class):
+    quality_type, quality_config = node_class.INPUT_TYPES()["optional"]["quality"]
+    options = quality_config["options"] if node_class is FD_GTPImage else quality_type
+    assert options == GPT_IMAGE_QUALITIES
+    assert quality_config["default"] == "medium"
+
+
+@pytest.mark.parametrize("quality", GPT_IMAGE_QUALITIES)
+@pytest.mark.parametrize("model", GPT_IMAGE_MODELS)
+def test_fd_gtp_image_passes_resize_to_client(monkeypatch, model, quality):
     node = FD_GTPImage()
     captured = {}
 
@@ -177,9 +204,9 @@ def test_fd_gtp_image_passes_resize_to_client(monkeypatch):
     image, output_text, result_url = node.api_call(
         out_request_id="req-resize",
         prompt="edit image",
-        model="gpt-image-2",
+        model=model,
         resolution="2K",
-        quality="high",
+        quality=quality,
         resize=False,
         images=torch.zeros((1, 2, 2, 3), dtype=torch.float32),
         aspect_ratio="3:4",
@@ -190,8 +217,80 @@ def test_fd_gtp_image_passes_resize_to_client(monkeypatch):
     assert result_url == "https://example.com/result.png"
     assert captured["resize"] is False
     assert captured["aspect_ratio"] == "3:4"
-    assert captured["quality"] == "high"
+    assert captured["quality"] == quality
     assert captured["out_request_id"] == "req-resize"
+    assert captured["model"] == model
+    assert captured["size"] == "2K"
+    assert len(captured["image_tensors"]) == 1
+    assert torch.equal(captured["image_tensors"][0], torch.zeros((1, 2, 2, 3)))
+
+
+@pytest.mark.parametrize("quality", GPT_IMAGE_QUALITIES)
+@pytest.mark.parametrize("model", GPT_IMAGE_MODELS)
+@pytest.mark.parametrize("batch_size", [1, 2])
+@pytest.mark.parametrize(
+    ("node_class", "module_name"),
+    [
+        (FD_GPTImageComboNode, "gpt_image_combo_node"),
+        (FD_GPTMultiImage, "gpt_multi_image_node"),
+    ],
+)
+def test_gpt_generate_forwards_model_to_every_request(monkeypatch, model, batch_size, node_class, module_name, quality):
+    from threading import Barrier, Lock
+
+    captured = []
+    lock = Lock()
+    barrier = Barrier(batch_size)
+    images = [torch.zeros((1, 2, 2, 3)), torch.ones((1, 2, 2, 3))]
+
+    class FakeClient:
+        def edit_image(self, **kwargs):
+            with lock:
+                captured.append(kwargs)
+            # Multiple requests must actually reach the client concurrently.
+            barrier.wait(timeout=10)
+            return io.BytesIO(b"fake-image"), "ok", "https://example.com/result.png"
+
+    monkeypatch.setattr(
+        f"src.Comfyui_Fd_Nodes.{module_name}.get_default_gpt_image_edit_client",
+        lambda: FakeClient(),
+    )
+    monkeypatch.setattr(
+        f"src.Comfyui_Fd_Nodes.{module_name}.bytesio_to_image_tensor",
+        lambda _: torch.ones((1, 2, 2, 3)),
+    )
+    inputs = (
+        {"combo_1": {"images": images, "prompt": "edit both"}, "max_concurrency": 2}
+        if node_class is FD_GPTImageComboNode
+        else {"image_1": images[0], "image_2": images[1], "prompt": "edit both"}
+    )
+    output = node_class().generate(
+        model=model,
+        aspect_ratio="3:4",
+        image_size="2K",
+        quality=quality,
+        resize=False,
+        batch_size=batch_size,
+        seed_mode="固定种子",
+        seed=42,
+        out_request_id="req-model",
+        **inputs,
+    )
+
+    assert len(output[0]) == batch_size
+    assert output[1] == 42
+    assert len(captured) == batch_size
+    for request in captured:
+        assert request["model"] == model
+        assert request["prompt"] == "edit both"
+        assert request["size"] == "2K"
+        assert request["quality"] == quality
+        assert request["resize"] is False
+        assert request["aspect_ratio"] == "3:4"
+        assert request["out_request_id"] == "req-model"
+        assert len(request["image_tensors"]) == 2
+        for actual, expected in zip(request["image_tensors"], images):
+            assert torch.equal(actual, expected)
 
 
 def test_fd_gtp_image_size_override_passes_custom_size_to_client(monkeypatch):

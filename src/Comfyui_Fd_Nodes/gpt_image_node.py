@@ -46,7 +46,7 @@ class FD_GTPImage(ComfyNodeABC):
                     IO.COMBO,
                     {
                         "tooltip": "The GPT image model to use for image edits.",
-                        "options": ["gpt-image-2"],
+                        "options": ["gpt-image-2", "gpt-image-2.5"],
                         "default": "gpt-image-2",
                     },
                 ),
@@ -96,7 +96,7 @@ class FD_GTPImage(ComfyNodeABC):
                     IO.COMBO,
                     {
                         "default": "medium",
-                        "options": ["low", "medium", "high"],
+                        "options": ["low", "medium", "high", "xhigh", "max"],
                         "tooltip": "输出图片质量，默认 medium。追加到 optional 末尾以兼容旧 workflow 的 widget 顺序。",
                     },
                 ),
@@ -187,6 +187,7 @@ class FD_GTPImage(ComfyNodeABC):
         client = get_default_gpt_image_edit_client()
         image_bytesio, output_text, result_url = client.edit_image(
             image_tensors=request_images,
+            model=model,
             prompt=prompt.strip(),
             size=size,
             aspect_ratio=effective_aspect_ratio,

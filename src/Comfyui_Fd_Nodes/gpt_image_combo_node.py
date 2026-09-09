@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 class FD_GPTImageComboNode:
     """GPT 图生图 combo 节点 - 接收最多8个图片组合并发调用 GPT Image API。"""
 
-    MODELS = ["gpt-image-2"]
+    MODELS = ["gpt-image-2", "gpt-image-2.5"]
     ASPECT_RATIOS = ["", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9", "9:21"]
     IMAGE_SIZES = ["4K", "2K", "1K"]
-    QUALITIES = ["low", "medium", "high"]
+    QUALITIES = ["low", "medium", "high", "xhigh", "max"]
     SEED_MODES = ["随机种子", "固定种子"]
 
     @classmethod
@@ -126,6 +126,7 @@ class FD_GPTImageComboNode:
         resize,
         out_request_id="",
         size_override="",
+        model="gpt-image-2",
     ):
         if not prompt or not prompt.strip():
             raise RuntimeError("prompt 不能为空")
@@ -144,7 +145,7 @@ class FD_GPTImageComboNode:
                 webhook_send(FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL, {
                     "gtp_image_request": {
                         "data": {
-                            "model": self.MODELS[0],
+                            "model": model,
                             "prompt": prompt.strip(),
                             "size": size,
                             "quality": quality,
@@ -164,6 +165,7 @@ class FD_GPTImageComboNode:
         client = get_default_gpt_image_edit_client()
         image_bytesio, output_text, result_url = client.edit_image(
             image_tensors=images,
+            model=model,
             prompt=prompt.strip(),
             size=size,
             aspect_ratio=effective_aspect_ratio,
@@ -210,8 +212,6 @@ class FD_GPTImageComboNode:
                  combo_1=None, combo_2=None, combo_3=None, combo_4=None,
                  combo_5=None, combo_6=None, combo_7=None, combo_8=None,
                  system_prompt="", size_override=""):
-        del model
-
         actual_seed = random.randint(0, 2147483647) if seed_mode == "随机种子" else seed
 
         combos = [c for c in [combo_1, combo_2, combo_3, combo_4, combo_5, combo_6, combo_7, combo_8] if c is not None]
@@ -261,6 +261,7 @@ class FD_GPTImageComboNode:
                                 resize,
                                 out_request_id,
                                 size_override,
+                                model,
                             ),
                         ))
                         task_idx += 1

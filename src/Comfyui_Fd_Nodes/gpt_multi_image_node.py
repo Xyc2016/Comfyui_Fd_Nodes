@@ -19,10 +19,10 @@ logger = logging.getLogger(__name__)
 class FD_GPTMultiImage:
     """GPT 多图编辑节点，沿用知衣多图输入与并发方式，底层调用 GPT Image edit API。"""
 
-    MODELS = ["gpt-image-2"]
+    MODELS = ["gpt-image-2", "gpt-image-2.5"]
     ASPECT_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9", "9:21"]
     IMAGE_SIZES = ["4K", "2K", "1K"]
-    QUALITIES = ["low", "medium", "high"]
+    QUALITIES = ["low", "medium", "high", "xhigh", "max"]
     SEED_MODES = ["随机种子", "固定种子"]
 
     @classmethod
@@ -139,6 +139,7 @@ class FD_GPTMultiImage:
         resize,
         out_request_id="default",
         size_override="",
+        model="gpt-image-2",
     ):
         preset_size = self._build_gpt_size(aspect_ratio, image_size)
         size, effective_aspect_ratio = resolve_gpt_image_size(
@@ -151,6 +152,7 @@ class FD_GPTMultiImage:
             client = get_default_gpt_image_edit_client()
             image_bytesio, _, _ = client.edit_image(
                 image_tensors=images,
+                model=model,
                 prompt=prompt,
                 size=size,
                 aspect_ratio=effective_aspect_ratio,
@@ -192,7 +194,6 @@ class FD_GPTMultiImage:
         system_prompt="",
         size_override="",
     ):
-        del model
         if node_switch == 1:
             empty = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
             return (empty, 0)
@@ -244,6 +245,7 @@ class FD_GPTMultiImage:
                             resize,
                             out_request_id,
                             size_override,
+                            model,
                         ),
                     )
                 )

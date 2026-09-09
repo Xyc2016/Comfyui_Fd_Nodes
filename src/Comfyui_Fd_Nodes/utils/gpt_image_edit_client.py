@@ -55,11 +55,14 @@ class GptImageEditClient:
         quality: str = "medium",
         resize=True,
         out_request_id: str = "",
+        model: str = "gpt-image-2",
     ) -> Tuple[BytesIO, str, str]:
         """根据 backend 选择调用方式，返回 (image_bytesio, output_text, result_url)。"""
-        if self.backend == "litellm":
+        # GPT 2.5 的渠道分配由业务服务负责，LiteLLM 不接收业务模型名。
+        if self.backend == "litellm" and model != "gpt-image-2.5":
             return self._edit_via_litellm(
                 image_tensors=image_tensors,
+                model=model,
                 prompt=prompt,
                 size=size,
                 aspect_ratio=aspect_ratio,
@@ -69,6 +72,7 @@ class GptImageEditClient:
             )
         return self._edit_via_image_generation(
             image_tensors=image_tensors,
+            model=model,
             prompt=prompt,
             size=size,
             aspect_ratio=aspect_ratio,
@@ -87,12 +91,13 @@ class GptImageEditClient:
         quality: str,
         resize,
         out_request_id: str,
+        model: str,
     ) -> Tuple[BytesIO, str, str]:
         image_urls = self._upload_images(image_tensors)
         normalized_resize = self._normalize_resize(resize)
 
         body = {
-            "channel": self.GPT_IMAGE_CHANNEL,
+            "channel": model,
             "image_url_list": image_urls,
             "prompt": prompt,
             "size": size,
@@ -108,7 +113,7 @@ class GptImageEditClient:
 
         logger.info(
             "Calling image-generation /image/edit channel=%s size=%s aspect_ratio=%s quality=%s resize=%s image_count=%s url=%s",
-            self.GPT_IMAGE_CHANNEL, size, aspect_ratio or "", quality, normalized_resize, len(image_urls), self.edit_url,
+            model, size, aspect_ratio or "", quality, normalized_resize, len(image_urls), self.edit_url,
         )
         try:
             response = self._request_post(
@@ -215,6 +220,7 @@ class GptImageEditClient:
         quality: str,
         resize,
         out_request_id: str,
+        model: str,
     ) -> Tuple[BytesIO, str, str]:
         mixin = _LiteLLMAdapter()
         multipart_files = []
@@ -224,7 +230,7 @@ class GptImageEditClient:
             multipart_files.append(("image", (f"image_{idx}.png", img_bytes, "image/png")))
 
         data = {
-            "model": self.GPT_IMAGE_CHANNEL,
+            "model": model,
             "prompt": prompt,
             "size": size,
             "quality": quality,
