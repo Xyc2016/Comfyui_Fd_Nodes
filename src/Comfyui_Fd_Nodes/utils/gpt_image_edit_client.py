@@ -27,6 +27,10 @@ class GptImageEditClient:
 
     DEFAULT_TIMEOUT = 300
     GPT_IMAGE_CHANNEL = "gpt-image-2"
+    LITELLM_MODEL_ALIASES = {
+        "gpt-image-2.5-sunburst-siphonlab",
+        "gpt-image-2.5-flare-siphonlab",
+    }
 
     def __init__(
         self,
@@ -58,8 +62,10 @@ class GptImageEditClient:
         model: str = "gpt-image-2",
     ) -> Tuple[BytesIO, str, str]:
         """根据 backend 选择调用方式，返回 (image_bytesio, output_text, result_url)。"""
-        # GPT 2.5 的渠道分配由业务服务负责，LiteLLM 不接收业务模型名。
-        if self.backend == "litellm" and model != "gpt-image-2.5":
+        # 上游别名使用 LiteLLM 的 model；业务名 gpt-image-2.5 由业务服务分配渠道。
+        if model in self.LITELLM_MODEL_ALIASES or (
+            self.backend == "litellm" and model != "gpt-image-2.5"
+        ):
             return self._edit_via_litellm(
                 image_tensors=image_tensors,
                 model=model,

@@ -128,8 +128,15 @@ def test_image_generation_edit_sends_resize_true_by_default():
 
 
 @pytest.mark.parametrize("quality", ["low", "medium", "high", "xhigh", "max"])
-@pytest.mark.parametrize("model", [None, "gpt-image-2"])
-def test_litellm_edit_preserves_model_size_quality_and_images(monkeypatch, model, quality):
+@pytest.mark.parametrize(("model", "backend"), [
+    (None, "litellm"),
+    ("gpt-image-2", "litellm"),
+    ("gpt-image-2.5-sunburst-siphonlab", "litellm"),
+    ("gpt-image-2.5-flare-siphonlab", "litellm"),
+    ("gpt-image-2.5-sunburst-siphonlab", "image_generation"),
+    ("gpt-image-2.5-flare-siphonlab", "image_generation"),
+])
+def test_litellm_edit_preserves_model_size_quality_and_images(monkeypatch, model, backend, quality):
     captured = {}
     result = (io.BytesIO(_png_bytes()), "ok", "https://example.com/result.png")
 
@@ -141,7 +148,7 @@ def test_litellm_edit_preserves_model_size_quality_and_images(monkeypatch, model
         "src.Comfyui_Fd_Nodes.utils.gpt_image_edit_client._LiteLLMAdapter._call_gpt_image_with_retry_policy",
         fake_request,
     )
-    client = GptImageEditClient(backend="litellm")
+    client = GptImageEditClient(backend=backend)
     images = [torch.zeros((1, 2, 2, 3)), torch.ones((1, 2, 2, 3))]
     output = client.edit_image(
         image_tensors=images,
