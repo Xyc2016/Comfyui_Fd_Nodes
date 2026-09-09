@@ -10,7 +10,7 @@ WEB_DIRECTORY = "./src/Comfyui_Fd_Nodes/other"
 
 __author__ = """xuyucai"""
 __email__ = "986327386@qq.com"
-__version__ = "53.8.50"
+__version__ = "53.8.51"
 
 try:
     from .src.Comfyui_Fd_Nodes.nodes import NODE_CLASS_MAPPINGS

@@ -36,6 +36,10 @@ class DummyResponse:
     ("gpt-image-2", "image_generation"),
     ("gpt-image-2.5", "image_generation"),
     ("gpt-image-2.5", "litellm"),
+    ("gpt-image-2.5-sunburst-siphonlab", "litellm"),
+    ("gpt-image-2.5-flare-siphonlab", "litellm"),
+    ("gpt-image-2.5-sunburst-siphonlab", "image_generation"),
+    ("gpt-image-2.5-flare-siphonlab", "image_generation"),
 ])
 def test_image_generation_edit_uploads_posts_and_downloads(monkeypatch, model, backend, quality):
     calls = []
@@ -131,10 +135,6 @@ def test_image_generation_edit_sends_resize_true_by_default():
 @pytest.mark.parametrize(("model", "backend"), [
     (None, "litellm"),
     ("gpt-image-2", "litellm"),
-    ("gpt-image-2.5-sunburst-siphonlab", "litellm"),
-    ("gpt-image-2.5-flare-siphonlab", "litellm"),
-    ("gpt-image-2.5-sunburst-siphonlab", "image_generation"),
-    ("gpt-image-2.5-flare-siphonlab", "image_generation"),
 ])
 def test_litellm_edit_preserves_model_size_quality_and_images(monkeypatch, model, backend, quality):
     captured = {}
@@ -178,15 +178,22 @@ def test_litellm_edit_preserves_model_size_quality_and_images(monkeypatch, model
             assert image.convert("RGB").getpixel((0, 0)) == (index * 255,) * 3
 
 
-def test_image_generation_edit_raises_error_message_on_status_false():
+@pytest.mark.parametrize("model", ["gpt-image-2", "gpt-image-2.5", "gpt-image-2.5-sunburst-siphonlab", "gpt-image-2.5-flare-siphonlab"])
+def test_image_generation_edit_raises_error_message_on_status_false(model):
+    channels = []
+
+    def fake_post(*args, **kwargs):
+        channels.append(kwargs["json"]["channel"])
+        return DummyResponse(data={
+            "status": False,
+            "error": {"code": "510000", "message": "gpt-image-2服务使用出错"},
+        })
+
     client = GptImageEditClient(
         backend="image_generation",
         edit_url="https://image-generation.example.com/image/edit",
         oss_uploader=lambda path, data: "https://oss.example.com/input.png",
-        request_post=lambda *args, **kwargs: DummyResponse(data={
-            "status": False,
-            "error": {"code": "510000", "message": "gpt-image-2服务使用出错"},
-        }),
+        request_post=fake_post,
     )
 
     with pytest.raises(RuntimeError, match="gpt-image-2服务使用出错"):
@@ -195,7 +202,10 @@ def test_image_generation_edit_raises_error_message_on_status_false():
             prompt="edit",
             size="2K",
             quality="low",
+            model=model,
         )
+
+    assert channels == [model]
 
 
 @pytest.mark.parametrize(
