@@ -24,7 +24,7 @@ def test_aistudio_combo_node_metadata():
         "seed",
     ]
     assert list(input_types["optional"])[-5:] == ["quality", "target_url", "api_key", "api_type", "size_override"]
-    assert input_types["optional"]["quality"][0] == ["low", "medium", "high"]
+    assert input_types["optional"]["quality"][0] == ["low", "medium", "high", "xhigh", "max"]
     assert input_types["optional"]["target_url"][0] == "STRING"
     assert input_types["optional"]["api_key"][0] == "STRING"
     assert input_types["optional"]["api_type"][0] == ["auto", "gpt_image", "gemini_image", "aistudio_publish"]
@@ -283,7 +283,8 @@ def test_aistudio_combo_generate_routes_gemini_model_to_litellm_chat(monkeypatch
     assert messages[1]["content"][1]["image_url"]["url"] == "data:image/png;base64,AAA"
 
 
-def test_aistudio_combo_single_gpt_request_uses_gpt_edits_payload(monkeypatch):
+@pytest.mark.parametrize("quality", ["low", "medium", "high", "xhigh", "max"])
+def test_aistudio_combo_single_gpt_request_uses_gpt_edits_payload(monkeypatch, quality):
     node = ZhiYiAiStudioImageComboNode()
     image = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
     captured = {}
@@ -302,7 +303,7 @@ def test_aistudio_combo_single_gpt_request_uses_gpt_edits_payload(monkeypatch):
         images=[image],
         aspect_ratio="9:16",
         image_size="1K",
-        quality="LOW",
+        quality=quality.upper(),
         seed=1,
         out_request_id="req-1",
     )
@@ -316,7 +317,7 @@ def test_aistudio_combo_single_gpt_request_uses_gpt_edits_payload(monkeypatch):
         "model": "gpt-image-2",
         "prompt": "test prompt",
         "size": "720x1280",
-        "quality": "low",
+        "quality": quality,
         "user": "req-1",
     }
     assert len(captured["multipart_files"]) == 1
