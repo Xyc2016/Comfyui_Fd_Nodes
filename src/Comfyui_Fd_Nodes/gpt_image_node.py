@@ -46,7 +46,7 @@ class FD_GTPImage(ComfyNodeABC):
                     IO.COMBO,
                     {
                         "tooltip": "The GPT image model to use for image edits.",
-                        "options": ["gpt-image-2", "gpt-image-2.5", "gpt-image-2.5-sunburst-siphonlab", "gpt-image-2.5-flare-siphonlab"],
+                        "options": ["gpt-image-2", "gpt-image-2-primary", "gpt-image-2.5", "gpt-image-2.5-sunburst-siphonlab", "gpt-image-2.5-flare-siphonlab"],
                         "default": "gpt-image-2",
                     },
                 ),

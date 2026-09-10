@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class FD_GPTImageComboNode:
     """GPT 图生图 combo 节点 - 接收最多8个图片组合并发调用 GPT Image API。"""
 
-    MODELS = ["gpt-image-2", "gpt-image-2.5", "gpt-image-2.5-sunburst-siphonlab", "gpt-image-2.5-flare-siphonlab"]
+    MODELS = ["gpt-image-2", "gpt-image-2-primary", "gpt-image-2.5", "gpt-image-2.5-sunburst-siphonlab", "gpt-image-2.5-flare-siphonlab"]
     ASPECT_RATIOS = ["", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9", "9:21"]
     IMAGE_SIZES = ["4K", "2K", "1K"]
     QUALITIES = ["low", "medium", "high", "xhigh", "max"]

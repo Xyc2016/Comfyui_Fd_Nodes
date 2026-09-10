@@ -25,9 +25,10 @@ class GptImageEditClient:
     - backend="litellm"：走旧 multipart {FD_LITELLM_BASE_URL}/v1/images/edits
     """
 
-    DEFAULT_TIMEOUT = 300
+    DEFAULT_TIMEOUT = 500
     GPT_IMAGE_CHANNEL = "gpt-image-2"
-    GPT_25_CHANNELS = {
+    IMAGE_GENERATION_ONLY_CHANNELS = {
+        "gpt-image-2-primary",
         "gpt-image-2.5",
         "gpt-image-2.5-sunburst-siphonlab",
         "gpt-image-2.5-flare-siphonlab",
@@ -63,8 +64,8 @@ class GptImageEditClient:
         model: str = "gpt-image-2",
     ) -> Tuple[BytesIO, str, str]:
         """根据 backend 选择调用方式，返回 (image_bytesio, output_text, result_url)。"""
-        # GPT 2.5 的三个公共 channel 均由业务服务处理路由和回退。
-        if self.backend == "litellm" and model not in self.GPT_25_CHANNELS:
+        # 这些公共 channel 的路由语义由 image-generation 服务保证。
+        if self.backend == "litellm" and model not in self.IMAGE_GENERATION_ONLY_CHANNELS:
             return self._edit_via_litellm(
                 image_tensors=image_tensors,
                 model=model,
