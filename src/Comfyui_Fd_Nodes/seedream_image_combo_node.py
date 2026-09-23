@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 class FD_SeedreamImageComboNode:
     """Seedream 图生图 combo 节点 - 接收最多8个图片组合并发调用 Seedream API。"""
 
-    MODELS = ["doubao-seedream-5.0-lite", "doubao-seedream-5.0-pro"]
+    MODELS = ["doubao-seedream-5.0-lite", "doubao-seedream-5.0-pro", "doubao-seedream-5.0-flash"]
     IMAGE_SIZES = SEEDREAM_IMAGE_SIZES
     ASPECT_RATIOS = SEEDREAM_ASPECT_RATIOS
     OUTPUT_FORMATS = ["png", "jpg"]

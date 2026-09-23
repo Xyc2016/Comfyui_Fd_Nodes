@@ -619,7 +619,7 @@ class FD_SeedreamImage(ComfyNodeABC):
                     },
                 ),
                 "model": (
-                    ["doubao-seedream-5.0-lite", "doubao-seedream-5.0-pro"],
+                    ["doubao-seedream-5.0-lite", "doubao-seedream-5.0-pro", "doubao-seedream-5.0-flash"],
                     {
                         "default": "doubao-seedream-5.0-lite",
                         "tooltip": "Model to use for generation",

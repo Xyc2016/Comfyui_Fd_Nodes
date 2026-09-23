@@ -46,7 +46,7 @@ def make_fake_client(captured=None, download_content=b"fake-image"):
 def test_seedream_combo_node_metadata():
     input_types = FD_SeedreamImageComboNode.INPUT_TYPES()
 
-    assert input_types["required"]["model"][0] == ["doubao-seedream-5.0-lite", "doubao-seedream-5.0-pro"]
+    assert input_types["required"]["model"][0] == ["doubao-seedream-5.0-lite", "doubao-seedream-5.0-pro", "doubao-seedream-5.0-flash"]
     assert input_types["required"]["size"][0] == ["4K", "3K", "2K", "1K"]
     assert input_types["required"]["size"][1]["default"] == "2K"
     assert input_types["required"]["output_format"][0] == ["png", "jpg"]

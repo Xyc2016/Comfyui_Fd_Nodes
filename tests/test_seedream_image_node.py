@@ -61,7 +61,7 @@ def attach_client(monkeypatch, client):
 def test_seedream_image_node_metadata_exposes_aspect_ratio():
     input_types = FD_SeedreamImage.INPUT_TYPES()
 
-    assert input_types["required"]["model"][0] == ["doubao-seedream-5.0-lite", "doubao-seedream-5.0-pro"]
+    assert input_types["required"]["model"][0] == ["doubao-seedream-5.0-lite", "doubao-seedream-5.0-pro", "doubao-seedream-5.0-flash"]
     assert input_types["required"]["size"][0] == ["4K", "3K", "2K", "1K"]
     assert input_types["required"]["size"][1]["default"] == "2K"
     assert input_types["optional"]["aspect_ratio"][0] == [
