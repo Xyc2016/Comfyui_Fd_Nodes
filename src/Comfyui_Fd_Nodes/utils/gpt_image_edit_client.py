@@ -25,13 +25,15 @@ class GptImageEditClient:
     - backend="litellm"：走旧 multipart {FD_LITELLM_BASE_URL}/v1/images/edits
     """
 
-    DEFAULT_TIMEOUT = 500
+    # VIP 路由（gpt-image-2.5-vip）按链回退最多 3 次尝试，上游文档建议客户端读取超时 600 秒。
+    DEFAULT_TIMEOUT = 600
     GPT_IMAGE_CHANNEL = "gpt-image-2"
     IMAGE_GENERATION_ONLY_CHANNELS = {
         "gpt-image-2-primary",
         "gpt-image-2.5",
         "gpt-image-2.5-sunburst-siphonlab",
         "gpt-image-2.5-flare-siphonlab",
+        "gpt-image-2.5-vip",
     }
 
     def __init__(

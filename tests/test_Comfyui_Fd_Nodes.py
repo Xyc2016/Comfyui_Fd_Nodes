@@ -162,6 +162,7 @@ GPT_IMAGE_MODELS = [
     "gpt-image-2.5",
     "gpt-image-2.5-sunburst-siphonlab",
     "gpt-image-2.5-flare-siphonlab",
+    "gpt-image-2.5-vip",
 ]
 
 
