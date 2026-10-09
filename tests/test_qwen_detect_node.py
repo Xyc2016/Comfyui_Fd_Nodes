@@ -364,7 +364,7 @@ class TestQwenDetectNodeMetadata:
         json_output, bboxes, bboxes_for_sam2 = node.detect(
             image=image,
             target="bag",
-            model="qwen3-vl-flash",
+            model="qwen3.6-flash",
             score_threshold=0.0,
             bbox_selection="all",
             merge_boxes=False,

@@ -264,7 +264,7 @@ def _build_detection_prompt(target: str) -> str:
 # ---------------------------------------------------------------------------
 
 class ZhiYiQwenDetectNode:
-    """Use Qwen3-VL-Flash API to detect objects and output bounding boxes."""
+    """Use Qwen Flash vision API (qwen3.6-flash) to detect objects and output bounding boxes."""
 
     def __init__(self):
         self.gemini_client = GeminiImageServiceClient()
@@ -275,7 +275,7 @@ class ZhiYiQwenDetectNode:
             "required": {
                 "image": ("IMAGE",),
                 "target": ("STRING", {"default": "object"}),
-                "model": ("STRING", {"default": "qwen3-vl-flash"}),
+                "model": ("STRING", {"default": "qwen3.6-flash"}),
                 "score_threshold": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "bbox_selection": ("STRING", {"default": "all"}),
                 "merge_boxes": ("BOOLEAN", {"default": False}),
@@ -296,7 +296,7 @@ class ZhiYiQwenDetectNode:
         self,
         image,
         target: str,
-        model: str = "qwen3-vl-flash",
+        model: str = "qwen3.6-flash",
         score_threshold: float = 0.0,
         bbox_selection: str = "all",
         merge_boxes: bool = False,
