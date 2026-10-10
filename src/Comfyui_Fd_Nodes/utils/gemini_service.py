@@ -27,6 +27,13 @@ MODEL_NAME_MAP = {
     "gemini-3-pro-image-preview-aistudio": "google/gemini-3-pro-image-preview-official",
     "gemini-3-pro-image-preview-official": "google/gemini-3-pro-image-preview-official",
     "gemini-3.1-flash-image-preview": "google/gemini-3.1-flash-image-preview",
+    "gemini-nano-banana-2.1": "google/gemini-nano-banana-2.1",
+}
+
+NANO_BANANA_MODEL = "google/gemini-nano-banana-2.1"
+NANO_BANANA_RESOLUTION_MAP = {
+    "720P": "1K",
+    "1080P": "2K",
 }
 
 
@@ -59,6 +66,19 @@ def normalize_gemini_model_name(model: str) -> str:
     if model_name.startswith(("google/", "batch/")):
         return model_name
     return MODEL_NAME_MAP.get(model_name, f"google/{model_name}" if model_name else model_name)
+
+
+def is_nano_banana_model(model: str) -> bool:
+    return normalize_gemini_model_name(model) == NANO_BANANA_MODEL
+
+
+def normalize_gemini_resolution(model: str, image_size: Optional[str]) -> Optional[str]:
+    if not image_size:
+        return image_size
+    normalized_size = str(image_size).strip()
+    if is_nano_banana_model(model):
+        return NANO_BANANA_RESOLUTION_MAP.get(normalized_size, normalized_size)
+    return normalized_size
 
 
 def is_batch_gemini_model(model: str) -> bool:
@@ -150,13 +170,14 @@ class GeminiImageServiceClient:
             "aspect_ratio": aspect_ratio or "",
             "image_url_list": image_url_list,
         }
-        if image_size:
-            body["resolution"] = image_size
+        normalized_image_size = normalize_gemini_resolution(normalized_model, image_size)
+        if normalized_image_size:
+            body["resolution"] = normalized_image_size
         if is_batch_gemini_model(normalized_model):
             body["batch_task_id"] = batch_task_id
             body["batch_item_id"] = batch_item_id
-        if enable_color_bias_correction is True:
-            body["enable_color_bias_correction"] = True
+        if enable_color_bias_correction is True or is_nano_banana_model(normalized_model):
+            body["enable_color_bias_correction"] = bool(enable_color_bias_correction)
             body["color_bias_reference_image_index"] = (
                 color_bias_reference_image_index
                 if isinstance(color_bias_reference_image_index, int)
@@ -172,6 +193,8 @@ class GeminiImageServiceClient:
             "model": body.get("model"),
             "aspect_ratio": body.get("aspect_ratio"),
             "resolution": body.get("resolution"),
+            "enable_color_bias_correction": body.get("enable_color_bias_correction"),
+            "color_bias_reference_image_index": body.get("color_bias_reference_image_index"),
             "prompt_preview": summarize_text(body.get("prompt")),
             "prompt_length": len(body.get("prompt") or ""),
             "image_count": len(body.get("image_url_list") or []),

@@ -49,6 +49,7 @@ class ZhiYiImageToImageNode:
         "google/gemini-3-pro-image-preview-vip",
         "batch/gemini-3-pro-image-preview-vip",
         "gemini-3-pro-image-preview-adobe",
+        "gemini-nano-banana-2.1",
     ]
 
     ASPECT_RATIOS = ["", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9", "9:21"]
@@ -104,7 +105,7 @@ class ZhiYiImageToImageNode:
                     "multiline": True,
                 }),
                 "enable_color_bias_correction": ("BOOLEAN", {
-                    "default": False,
+                    "default": True,
                     "tooltip": "仅直连 image-server /image/gemini_image 时启用全局偏红纠正",
                 }),
                 "color_bias_reference_image_index": ("INT", {
@@ -129,7 +130,7 @@ class ZhiYiImageToImageNode:
         self.gemini_client = GeminiImageServiceClient()
 
     def _single_request(self, image_url_list, prompt, model, aspect_ratio, image_size, seed, out_request_id="default",
-                        enable_color_bias_correction=False, color_bias_reference_image_index=0,
+                        enable_color_bias_correction=True, color_bias_reference_image_index=0,
                         batch_task_id="", batch_item_id=""):
         image, _result_url, _message = self.gemini_client.call_with_image_urls(
             prompt=prompt,
@@ -185,7 +186,7 @@ class ZhiYiImageToImageNode:
                  node_switch=0, out_request_id="default", prompt_list=None,
                  image_2=None, image_3=None, image_4=None,
                  image_5=None, image_6=None, system_prompt="",
-                 enable_color_bias_correction=False, color_bias_reference_image_index=0,
+                 enable_color_bias_correction=True, color_bias_reference_image_index=0,
                  batch_task_id="", batch_item_id=""):
         if node_switch == 1:
             empty = torch.zeros((1, 64, 64, 3), dtype=torch.float32)

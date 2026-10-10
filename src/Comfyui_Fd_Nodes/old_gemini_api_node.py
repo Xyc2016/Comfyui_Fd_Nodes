@@ -24,7 +24,9 @@ from .utils.common_util import (
 from .utils.error_utils import normalize_error_message
 from .utils.gemini_service import (
     is_batch_gemini_model,
+    is_nano_banana_model,
     normalize_gemini_model_name,
+    normalize_gemini_resolution,
     validate_gemini_batch_ids,
 )
 from .utils.logging_utils import configure_default_logging
@@ -91,6 +93,7 @@ class GeminiImageModel(str, Enum):
     gemini_3_pro_image_preview_vip = "google/gemini-3-pro-image-preview-vip"
     batch_gemini_3_pro_image_preview_vip = "batch/gemini-3-pro-image-preview-vip"
     gemini_3_pro_image_preview_adobe = "gemini-3-pro-image-preview-adobe"
+    gemini_nano_banana_2_1 = "gemini-nano-banana-2.1"
 
 
 def fd_gemini_send_webhook(gemini_req_body: dict):
@@ -186,7 +189,7 @@ class FD_GeminiImage(ComfyNodeABC):
                 "enable_color_bias_correction": (
                     IO.BOOLEAN,
                     {
-                        "default": False,
+                        "default": True,
                         "tooltip": "启用 image-server 全局偏红纠正",
                     },
                 ),
@@ -239,7 +242,7 @@ class FD_GeminiImage(ComfyNodeABC):
         files: Optional[list[GeminiPart]] = None,
         n=1,
         unique_id: Optional[str] = None,
-        enable_color_bias_correction: bool = False,
+        enable_color_bias_correction: bool = True,
         color_bias_reference_image_index: int = 0,
         batch_task_id: str = "",
         batch_item_id: str = "",
@@ -260,12 +263,12 @@ class FD_GeminiImage(ComfyNodeABC):
             body["debug_resp"] = {"error": {"message": "XXX"}}
 
         if resolution:
-            body["resolution"] = resolution
+            body["resolution"] = normalize_gemini_resolution(normalized_model, resolution)
         if is_batch_gemini_model(normalized_model):
             body["batch_task_id"] = batch_task_id
             body["batch_item_id"] = batch_item_id
-        if enable_color_bias_correction is True:
-            body["enable_color_bias_correction"] = True
+        if enable_color_bias_correction is True or is_nano_banana_model(normalized_model):
+            body["enable_color_bias_correction"] = bool(enable_color_bias_correction)
             body["color_bias_reference_image_index"] = (
                 color_bias_reference_image_index
                 if isinstance(color_bias_reference_image_index, int)

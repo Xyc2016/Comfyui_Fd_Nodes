@@ -49,6 +49,7 @@ class ZhiYiImageToImageComboNode:
         "google/gemini-3-pro-image-preview-vip",
         "batch/gemini-3-pro-image-preview-vip",
         "gemini-3-pro-image-preview-adobe",
+        "gemini-nano-banana-2.1",
     ]
 
     ASPECT_RATIOS = ["", "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9", "9:21"]
@@ -106,7 +107,7 @@ class ZhiYiImageToImageComboNode:
                     "multiline": True,
                 }),
                 "enable_color_bias_correction": ("BOOLEAN", {
-                    "default": False,
+                    "default": True,
                     "tooltip": "仅直连 image-server /image/gemini_image 时启用全局偏红纠正",
                 }),
                 "color_bias_reference_image_index": ("INT", {
@@ -160,7 +161,7 @@ class ZhiYiImageToImageComboNode:
         return effective_batch_task_id, effective_batch_item_id
 
     def _single_request(self, image_url_list, prompt, model, aspect_ratio, image_size, seed, out_request_id="",
-                        enable_color_bias_correction=False, color_bias_reference_image_index=0,
+                        enable_color_bias_correction=True, color_bias_reference_image_index=0,
                         batch_task_id="", batch_item_id=""):
         log_payload = {
             "url": self.gemini_client.service_url,
@@ -232,7 +233,7 @@ class ZhiYiImageToImageComboNode:
                  combo_1=None, combo_2=None, combo_3=None, combo_4=None,
                  combo_5=None, combo_6=None, combo_7=None, combo_8=None,
                  combo_9=None, combo_10=None,
-                 system_prompt="", enable_color_bias_correction=False,
+                 system_prompt="", enable_color_bias_correction=True,
                  color_bias_reference_image_index=0,
                  batch_task_id="", batch_item_id=""):
         actual_seed = random.randint(0, 2147483647) if seed_mode == "随机种子" else seed

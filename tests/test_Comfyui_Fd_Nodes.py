@@ -7,6 +7,7 @@ import inspect
 import io
 import json
 import logging
+import types
 
 import pytest
 import torch
@@ -532,7 +533,7 @@ def test_gemini_image_nodes_append_color_bias_and_batch_inputs():
             "batch_task_id",
             "batch_item_id",
         ]
-        assert optional_inputs["enable_color_bias_correction"][1]["default"] is False
+        assert optional_inputs["enable_color_bias_correction"][1]["default"] is True
         assert optional_inputs["color_bias_reference_image_index"][1]["default"] == 0
         assert optional_inputs["batch_task_id"][1]["default"] == ""
         assert optional_inputs["batch_item_id"][1]["default"] == ""
@@ -555,7 +556,7 @@ def test_gemini_image_nodes_append_color_bias_and_batch_inputs():
             "batch_task_id",
             "batch_item_id",
         ]
-        assert signature.parameters["enable_color_bias_correction"].default is False
+        assert signature.parameters["enable_color_bias_correction"].default is True
         assert signature.parameters["color_bias_reference_image_index"].default == 0
         assert signature.parameters["batch_task_id"].default == ""
         assert signature.parameters["batch_item_id"].default == ""
@@ -581,6 +582,7 @@ def test_zhiyi_image_to_image_nodes_expose_legacy_and_channel_models():
         "google/gemini-3-pro-image-preview-vip",
         "batch/gemini-3-pro-image-preview-vip",
         "gemini-3-pro-image-preview-adobe",
+        "gemini-nano-banana-2.1",
     }
 
     assert expected_models.issubset(set(ZhiYiImageToImageNode.MODELS))
@@ -605,6 +607,7 @@ def test_zhiyi_image_to_image_nodes_expose_legacy_and_channel_models():
     }
     assert vip_models.issubset(set(fd_models))
     assert fd_models.count("gemini-3-pro-image-preview-adobe") == 1
+    assert fd_models.count("gemini-nano-banana-2.1") == 1
     assert ZhiYiImageToImageNode.MODELS.count("gemini-3-pro-image-preview-adobe") == 1
     assert ZhiYiImageToImageComboNode.MODELS.count("gemini-3-pro-image-preview-adobe") == 1
     for model in new_models:
@@ -807,6 +810,19 @@ def test_gemini_service_builds_internal_request_body():
         assert body["model"] == normalized
         assert should_use_litellm_gemini(alias) is False
 
+    nano_body = client.build_request_body(
+        prompt="draw product",
+        model="gemini-nano-banana-2.1",
+        image_url_list=["https://oss/input.png"],
+        image_size="1080P",
+        enable_color_bias_correction=False,
+        color_bias_reference_image_index=3,
+    )
+    assert nano_body["model"] == "google/gemini-nano-banana-2.1"
+    assert nano_body["resolution"] == "2K"
+    assert nano_body["enable_color_bias_correction"] is False
+    assert nano_body["color_bias_reference_image_index"] == 3
+
     aistudio_body = client.build_request_body(
         prompt="draw product",
         model="gemini-3-pro-image-preview-aistudio",
@@ -917,7 +933,10 @@ def test_gemini_service_model_and_prompt_helpers():
     assert normalize_gemini_model_name("gemini-3-pro-image-preview-official") == "google/gemini-3-pro-image-preview-official"
     assert normalize_gemini_model_name("google/gemini-3-pro-image-preview-official") == "google/gemini-3-pro-image-preview-official"
     assert normalize_gemini_model_name("gemini-3-pro-image-preview-aistudio") == "google/gemini-3-pro-image-preview-official"
-    assert should_use_litellm_gemini("gemini-3-pro-image-preview-aistudio") is False
+    assert normalize_gemini_model_name("gemini-nano-banana-2.1") == "google/gemini-nano-banana-2.1"
+    assert normalize_gemini_model_name("google/gemini-nano-banana-2.1") == "google/gemini-nano-banana-2.1"
+    assert should_use_litellm_gemini("gemini-nano-banana-2.1") is False
+    assert should_use_litellm_gemini("google/gemini-nano-banana-2.1") is False
     assert should_use_litellm_gemini("batch/gemini-3-pro-image-preview") is False
     assert should_use_litellm_gemini("gemini-3-pro-image-preview-vip") is False
     assert should_use_litellm_gemini("google/gemini-3-pro-image-preview-vip") is False
@@ -2445,8 +2464,12 @@ def test_configure_default_logging_installs_timestamp_format(monkeypatch):
     def fake_basic_config(**kwargs):
         captured.update(kwargs)
 
-    monkeypatch.setattr("src.Comfyui_Fd_Nodes.utils.logging_utils.logging.getLogger", fake_get_logger)
-    monkeypatch.setattr("src.Comfyui_Fd_Nodes.utils.logging_utils.logging.basicConfig", fake_basic_config)
+    # 替换 logging_utils 模块内的 logging 引用，避免补丁标准库 logging 污染整个测试会话
+    fake_logging = types.ModuleType("logging")
+    fake_logging.getLogger = fake_get_logger
+    fake_logging.basicConfig = fake_basic_config
+    fake_logging.Formatter = logging.Formatter
+    monkeypatch.setattr("src.Comfyui_Fd_Nodes.utils.logging_utils.logging", fake_logging)
 
     configure_default_logging()
 
@@ -2492,8 +2515,12 @@ def test_configure_default_logging_upgrades_existing_handler_without_timestamp(m
         nonlocal basic_config_called
         basic_config_called = True
 
-    monkeypatch.setattr("src.Comfyui_Fd_Nodes.utils.logging_utils.logging.getLogger", fake_get_logger)
-    monkeypatch.setattr("src.Comfyui_Fd_Nodes.utils.logging_utils.logging.basicConfig", fake_basic_config)
+    fake_logging = types.ModuleType("logging")
+    fake_logging.getLogger = fake_get_logger
+    fake_logging.basicConfig = fake_basic_config
+    fake_logging.Formatter = logging.Formatter
+
+    monkeypatch.setattr("src.Comfyui_Fd_Nodes.utils.logging_utils.logging", fake_logging)
 
     configure_default_logging()
 

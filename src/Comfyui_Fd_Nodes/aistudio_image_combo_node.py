@@ -22,7 +22,12 @@ from .utils.common_util import downscale_image_tensor
 from .utils.error_utils import ERROR_TIMEOUT, normalize_error_message
 from .utils.gpt_image_request import GptImageRequestMixin
 from .utils.gpt_image_size import resolution_to_edit_size, resolve_gpt_image_size
-from .utils.litellm_gemini_image import build_litellm_messages, call_litellm_gemini_image, tensor_to_base64
+from .utils.litellm_gemini_image import (
+    build_litellm_messages,
+    call_litellm_gemini_image,
+    should_use_litellm_gemini,
+    tensor_to_base64,
+)
 from .utils.logging_utils import configure_default_logging
 from .utils.oss_client import upload_bytes_to_oss
 
@@ -198,8 +203,12 @@ class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
         normalized_model = self._normalize_model_name(model).lower()
         if "gpt-image" in normalized_model:
             return "gpt_image"
-        if "gemini" in normalized_model:
+        if should_use_litellm_gemini(normalized_model):
             return "gemini_image"
+        if "gemini" in normalized_model:
+            raise RuntimeError(
+                f"模型 {model} 不支持 AiStudio 自动路由，请使用知衣 Gemini 图生图节点直连 image-server"
+            )
         return "aistudio_publish"
 
     def _should_use_gpt_litellm(self, model):

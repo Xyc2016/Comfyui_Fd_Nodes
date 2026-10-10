@@ -229,6 +229,13 @@ def test_aistudio_combo_generate_routes_gpt_image_model_to_litellm_without_uploa
     assert args[9] == "req-gpt"
 
 
+def test_aistudio_combo_auto_rejects_non_litellm_gemini_model():
+    node = ZhiYiAiStudioImageComboNode()
+
+    with pytest.raises(RuntimeError, match="不支持 AiStudio 自动路由"):
+        node._resolve_api_type("auto", "gemini-nano-banana-2.1")
+
+
 def test_aistudio_combo_generate_routes_gemini_model_to_litellm_chat(monkeypatch):
     node = ZhiYiAiStudioImageComboNode()
     image = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
@@ -245,7 +252,7 @@ def test_aistudio_combo_generate_routes_gemini_model_to_litellm_chat(monkeypatch
     monkeypatch.setattr(node, "_run_concurrent", fake_run_concurrent)
 
     images, actual_seed, log_text = node.generate(
-        model="gemini-3-pro-image-preview",
+        model="gemini-3-pro-image-preview-siphonlab",
         aspect_ratio="3:4",
         image_size="4K",
         target_url="https://custom-gemini.example.com/v1/chat/completions",
@@ -269,7 +276,7 @@ def test_aistudio_combo_generate_routes_gemini_model_to_litellm_chat(monkeypatch
     assert fn == node._single_gemini_request
     assert args[0] == "https://custom-gemini.example.com"
     assert args[1] == "gemini-secret"
-    assert args[2] == "gemini-3-pro-image-preview"
+    assert args[2] == "gemini-3-pro-image-preview-siphonlab"
     assert args[4] == "3:4"
     assert args[5] == "4K"
     assert args[6] == 30

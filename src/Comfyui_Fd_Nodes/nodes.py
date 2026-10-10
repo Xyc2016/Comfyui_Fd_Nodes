@@ -47,6 +47,8 @@ from .zhiyi_image_to_image_node import ZhiYiImageToImageNode
 from .toggle import NodeToggleByID
 from .utils.logging_utils import configure_default_logging
 from .zhiyi_image_combo_node import ZhiYiImageComboNode
+from .zhiyi_image_concat_node import ZhiYiImageConcatNode
+from .zhiyi_four_grid_crop_node import ZhiYiFourGridCropNode
 from .zhiyi_image_to_image_combo_node import ZhiYiImageToImageComboNode
 from .aistudio_image_combo_node import ZhiYiAiStudioImageComboNode
 from .remove_bg_by_meitu_node import ZhiYiRemoveBgByMeituNode
@@ -831,6 +833,8 @@ NODE_CLASS_MAPPINGS = {
     "ZhiYiTextGenNode": ZhiYiTextGenNode,
     "NodeToggleByID": NodeToggleByID,
     "ZhiYiImageComboNode": ZhiYiImageComboNode,
+    "ZhiYiImageConcatNode": ZhiYiImageConcatNode,
+    "ZhiYiFourGridCropNode": ZhiYiFourGridCropNode,
     "ZhiYiImageToImageComboNode": ZhiYiImageToImageComboNode,
     "ZhiYiAiStudioImageComboNode": ZhiYiAiStudioImageComboNode,
     "ZhiYiRemoveBgByMeituNode": ZhiYiRemoveBgByMeituNode,
@@ -879,6 +883,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ZhiYiTextGenNode": "知衣-文生文",
     "NodeToggleByID": "节点开关 (按ID)",
     "ZhiYiImageComboNode": "fd-输入参数组合",
+    "ZhiYiImageConcatNode": "知衣-组合图像(最长边)",
+    "ZhiYiFourGridCropNode": "知衣-四宫格识别拆分",
     "ZhiYiImageToImageComboNode": "知衣-图生图-combo",
     "ZhiYiAiStudioImageComboNode": "api 图生图节点测试",
     "ZhiYiRemoveBgByMeituNode": "知衣-美图服装抠图",
