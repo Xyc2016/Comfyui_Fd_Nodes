@@ -11,7 +11,7 @@ import torch
 from PIL import Image
 
 from .config import FD_OSS_URL_PATH_PREFIX_BEFORE_GEN
-from .four_grid_crop_core import crop_to_white_canvases, encode_png
+from .four_grid_crop_core import crop_to_white_canvases, encode_png, render_crop_canvases
 from .four_grid_crop_detector import DEFAULT_DETECTOR_URL, detect_person_boxes
 from .utils.common_util import bytes_calculate_hex_md5
 from .utils.oss_client import upload_bytes_to_oss
@@ -75,6 +75,7 @@ class ZhiYiFourGridCropNode:
     FUNCTION = "crop"
     CATEGORY = "知衣/图像处理"
     OUTPUT_NODE = False
+    DESCRIPTION = "四宫格人物裁剪；输出保持原图宽高比，使用对应宫格边缘背景补边，人物不缩放。"
 
     @staticmethod
     def _tensor_to_pil(image: torch.Tensor) -> Image.Image:
@@ -97,21 +98,10 @@ class ZhiYiFourGridCropNode:
         if image.ndim == 3:
             return [image.unsqueeze(0)]
         if image.ndim == 4:
+            if image.shape[0] == 0:
+                raise ValueError("图片 batch 不能为空")
             return [image[index : index + 1] for index in range(image.shape[0])]
         raise ValueError(f"图片 tensor 维度错误: {image.ndim}")
-
-    @staticmethod
-    def _pad_batch(images: list[torch.Tensor], canvas_size: tuple[int, int]) -> torch.Tensor:
-        target_width, target_height = canvas_size
-        padded: list[torch.Tensor] = []
-        for image in images:
-            height, width = image.shape[1:3]
-            canvas = torch.ones((1, target_height, target_width, 3), dtype=torch.float32)
-            offset_x = (target_width - width) // 2
-            offset_y = (target_height - height) // 2
-            canvas[:, offset_y : offset_y + height, offset_x : offset_x + width, :] = image
-            padded.append(canvas)
-        return torch.cat(padded, dim=0)
 
     @staticmethod
     def _upload_source(image: Image.Image) -> str:
@@ -144,9 +134,11 @@ class ZhiYiFourGridCropNode:
                 min_confidence=min_confidence,
             )
             details["detected_box_count"] = len(boxes)
-            output_tensors = [self._pil_to_tensor(crop) for crop in crops]
-            for crop in crops:
-                crop.close()
+            try:
+                output_tensors = [self._pil_to_tensor(crop) for crop in crops]
+            finally:
+                for crop in crops:
+                    crop.close()
             return output_tensors, details
         finally:
             source.close()
@@ -184,7 +176,19 @@ class ZhiYiFourGridCropNode:
             for output_index, output in enumerate(frame_outputs):
                 outputs[output_index].append(output)
 
-        result = tuple(self._pad_batch(items, (max_width, max_height)) for items in outputs)
+        target_size = (max_width, max_height)
+        for index, (frame, frame_details) in enumerate(zip(frames, details)):
+            if tuple(frame_details["canvas_size"]) != target_size:
+                with self._tensor_to_pil(frame) as source:
+                    canvases = render_crop_canvases(source, frame_details, target_size)
+                try:
+                    for output_index, canvas in enumerate(canvases):
+                        outputs[output_index][index] = self._pil_to_tensor(canvas)
+                finally:
+                    for canvas in canvases:
+                        canvas.close()
+            frame_details["output_canvas_size"] = list(target_size)
+        result = tuple(torch.cat(items, dim=0) for items in outputs)
         return (
             *result,
             json.dumps({"batch_size": len(frames), "canvas_size": [max_width, max_height], "items": details}, ensure_ascii=False),

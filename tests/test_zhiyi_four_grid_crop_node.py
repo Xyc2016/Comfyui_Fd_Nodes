@@ -2,6 +2,9 @@
 
 import json
 
+import pytest
+import requests
+
 import numpy as np
 import torch
 from PIL import Image
@@ -116,3 +119,89 @@ def test_node_processes_batch_and_uploads_each_frame(monkeypatch):
     assert details["batch_size"] == 2
     assert len(details["items"]) == 2
     assert all(path.endswith(".png") for path, _data in uploaded)
+
+
+@pytest.mark.parametrize("gradient", [False, True])
+def test_batch_rebuilds_background_from_source_without_extra_requests(monkeypatch, gradient):
+    height, width = 90, 120
+    array = np.zeros((2, height, width, 3), dtype=np.uint8)
+    array[0] = (80, 110, 140)
+    array[1] = (100, 130, 160)
+    if gradient:
+        for y in range(height):
+            for x in range(width):
+                array[0, y, x] = (40 + x, 60 + y, 80)
+    array[:, 5:25, 10:30] = (255, 0, 0)
+    frames = torch.from_numpy(array.astype(np.float32) / 255.0)
+    calls = []
+    uploads = []
+    monkeypatch.setattr(node_module, "upload_bytes_to_oss", lambda path, data: uploads.append(path) or "https://example.com/in.png")
+
+    def detect(url, image_size, **kwargs):
+        side = 20 if not calls else 30
+        calls.append(url)
+        return [PersonBox((10 + x, 5 + y, 10 + x + side, 5 + y + side)) for x, y in ((0, 0), (60, 0), (0, 45), (60, 45))]
+
+    monkeypatch.setattr(node_module, "detect_person_boxes", detect)
+    results = ZhiYiFourGridCropNode().crop(frames, padding=0)
+    assert len(calls) == len(uploads) == 2
+    assert all(result.shape == (2, 30, 40, 3) for result in results[:4])
+    details = json.loads(results[4])
+    assert details["items"][0]["canvas_size"] == [28, 21]
+    assert details["items"][0]["output_canvas_size"] == [40, 30]
+    # The centered subject stays exactly 20x20 pixels after the larger batch canvas is built.
+    assert torch.equal(results[0][0, 5:25, 10:30], frames[0, 5:25, 10:30])
+    pixel = tuple((results[0][0, 0, 0] * 255).round().int().tolist())
+    if gradient:
+        assert pixel == (41, 60, 80)
+        assert results[0][0, 0, -1, 0] > results[0][0, 0, 0, 0]
+    else:
+        assert pixel == (80, 110, 140)
+
+
+def test_detector_generic_protocol(monkeypatch):
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": {"persons": [[1, 2, 10, 20, 0.8]]}}
+
+    def post(url, **kwargs):
+        captured.update(kwargs)
+        return Response()
+
+    monkeypatch.setattr(four_grid_crop_detector.requests, "post", post)
+    boxes = four_grid_crop_detector.detect_person_boxes(
+        "https://example.com/input.png", (100, 100), detector_protocol="combine_detect_batch", boxes_path="data.persons", timeout=(5, 30)
+    )
+    assert boxes == [PersonBox((1, 2, 10, 20), 0.8)]
+    assert captured["json"]["internal"] is True
+    assert captured["json"]["image_list"][0]["url"] == "https://example.com/input.png"
+    assert captured["timeout"] == (5, 30)
+
+
+@pytest.mark.parametrize(
+    "error, code",
+    [
+        (requests.Timeout("timeout"), "detector_timeout"),
+        (requests.HTTPError("bad gateway"), "detector_unavailable"),
+        (requests.exceptions.JSONDecodeError("invalid", "x", 0), "detector_schema_error"),
+    ],
+)
+def test_detector_errors_are_explicit(monkeypatch, error, code):
+    def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(four_grid_crop_detector.requests, "post", fail)
+    with pytest.raises(four_grid_crop_detector.CropError) as caught:
+        four_grid_crop_detector.detect_person_boxes("https://example.com/input.png", (100, 100))
+    assert caught.value.code == code
+
+
+def test_saved_node_input_order_is_unchanged():
+    inputs = ZhiYiFourGridCropNode.INPUT_TYPES()
+    assert list(inputs["required"]) == ["image", "padding", "min_confidence"]
+    assert list(inputs["optional"]) == ["detector_url", "detector_timeout"]
