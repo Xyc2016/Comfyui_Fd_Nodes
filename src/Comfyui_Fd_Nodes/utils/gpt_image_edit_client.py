@@ -12,6 +12,7 @@ from .common_util import bytes_calculate_hex_md5, downscale_image_tensor
 from .error_utils import ERROR_TIMEOUT, normalize_error_message
 from .gpt_image_request import GptImageRequestMixin
 from .oss_client import upload_bytes_to_oss
+from .url_utils import normalize_oss_url
 from .logging_utils import configure_default_logging
 
 configure_default_logging()
@@ -195,7 +196,7 @@ class GptImageEditClient:
 
     def _download_result_image(self, result_url: str) -> BytesIO:
         try:
-            response = self._request_get(result_url, timeout=self.timeout)
+            response = self._request_get(normalize_oss_url(result_url), timeout=self.timeout)
         except requests.exceptions.Timeout as exc:
             raise RuntimeError(
                 normalize_error_message(exc, category=ERROR_TIMEOUT, fallback_detail="下载结果图超时")

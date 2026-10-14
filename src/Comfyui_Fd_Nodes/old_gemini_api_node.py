@@ -31,6 +31,7 @@ from .utils.gemini_service import (
 )
 from .utils.logging_utils import configure_default_logging
 from .utils.oss_client import upload_bytes_to_oss
+from .utils.url_utils import normalize_oss_url
 from .utils.webhook import webhook_send
 
 configure_default_logging()
@@ -345,7 +346,7 @@ class FD_GeminiImage(ComfyNodeABC):
             )
 
         result_url = result["result_image_url"]
-        image_content = requests.get(result_url).content
+        image_content = requests.get(normalize_oss_url(result_url)).content
         image_bytesio = BytesIO(image_content)
         output_image = bytesio_to_image_tensor(image_bytesio)
         output_text = result["message"]

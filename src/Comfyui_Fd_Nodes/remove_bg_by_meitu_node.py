@@ -18,6 +18,7 @@ from .utils.common_util import bytes_calculate_hex_md5, bytesio_to_image_tensor
 from .utils.error_utils import normalize_error_message
 from .utils.logging_utils import configure_default_logging
 from .utils.oss_client import upload_bytes_to_oss
+from .utils.url_utils import normalize_oss_url
 
 configure_default_logging()
 logger = logging.getLogger(__name__)
@@ -196,7 +197,7 @@ class ZhiYiRemoveBgByMeituNode:
         return self._extract_urls(result)
 
     def _download_bytes(self, url, timeout):
-        response = self._request_with_retry("GET", url, timeout=timeout, retry_count=1)
+        response = self._request_with_retry("GET", normalize_oss_url(url), timeout=timeout, retry_count=1)
         if response.status_code >= 400:
             raise RuntimeError(f"下载图片失败: {response.status_code}, url={url}")
         return response.content
