@@ -14,6 +14,7 @@ from ..config import (
 )
 from .error_utils import ERROR_TIMEOUT, normalize_error_message
 from .oss_client import upload_bytes_to_oss
+from .url_utils import normalize_oss_url
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +270,7 @@ class GeminiImageServiceClient:
                 )
 
             result_url = result["result_image_url"]
-            image_response = requests.get(result_url, timeout=300)
+            image_response = requests.get(normalize_oss_url(result_url), timeout=300)
             image_response.raise_for_status()
             return bytesio_to_image_tensor(BytesIO(image_response.content), mode="RGB"), result_url, result.get("message", "")
         except requests.exceptions.Timeout as exc:

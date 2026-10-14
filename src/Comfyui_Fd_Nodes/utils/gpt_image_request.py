@@ -8,6 +8,7 @@ import requests
 from ..config import FD_GEN_IMAGE_NOTIFICATION_WEBHOOK_URL
 from ..old_gemini_api_node import GenImageServiceError
 from .error_utils import ERROR_TIMEOUT, normalize_error_message
+from .url_utils import normalize_oss_url
 from .webhook import webhook_send
 
 
@@ -57,7 +58,7 @@ class GptImageRequestMixin:
         result_url = first_item.get("url", "")
 
         if result_url:
-            image_content = requests.get(result_url, timeout=300).content
+            image_content = requests.get(normalize_oss_url(result_url), timeout=300).content
             image_bytesio = BytesIO(image_content)
         elif first_item.get("b64_json"):
             image_bytesio = BytesIO(base64.b64decode(first_item["b64_json"]))

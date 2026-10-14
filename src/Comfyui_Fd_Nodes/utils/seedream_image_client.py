@@ -20,6 +20,7 @@ from .common_util import bytes_calculate_hex_md5, downscale_image_tensor
 from .error_utils import ERROR_TIMEOUT, normalize_error_message
 from .logging_utils import configure_default_logging
 from .oss_client import upload_bytes_to_oss
+from .url_utils import normalize_oss_url
 from .seedream_image_size import resolution_to_seedream_size
 from .webhook import webhook_send
 
@@ -214,7 +215,7 @@ class SeedreamImageClient:
             result = response.json()
             logger.info("Seedream API response: %s", result)
             result_url = result["data"][0]["url"]
-            image_response = self._request_get(result_url, timeout=self.timeout)
+            image_response = self._request_get(normalize_oss_url(result_url), timeout=self.timeout)
             image_response.raise_for_status()
         except requests.exceptions.Timeout as exc:
             raise RuntimeError(
@@ -280,7 +281,7 @@ class SeedreamImageClient:
 
     def _download_result_image(self, result_url: str) -> BytesIO:
         try:
-            response = self._request_get(result_url, timeout=self.timeout)
+            response = self._request_get(normalize_oss_url(result_url), timeout=self.timeout)
             response.raise_for_status()
         except requests.exceptions.Timeout as exc:
             raise RuntimeError(

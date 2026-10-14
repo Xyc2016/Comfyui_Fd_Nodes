@@ -30,6 +30,7 @@ from .utils.litellm_gemini_image import (
 )
 from .utils.logging_utils import configure_default_logging
 from .utils.oss_client import upload_bytes_to_oss
+from .utils.url_utils import normalize_oss_url
 
 configure_default_logging()
 logger = logging.getLogger(__name__)
@@ -282,7 +283,7 @@ class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
         return result_url
 
     def _download_result_image(self, result_url):
-        response = requests.get(result_url, timeout=300)
+        response = requests.get(normalize_oss_url(result_url), timeout=300)
         response.raise_for_status()
         return _bytesio_to_image_tensor(BytesIO(response.content))
 

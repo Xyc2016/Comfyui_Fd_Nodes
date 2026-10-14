@@ -34,6 +34,7 @@ from .utils.common_util import (
 )
 from .utils.error_utils import normalize_error_message
 from .utils.oss_client import upload_bytes_to_oss
+from .utils.url_utils import normalize_oss_url
 from .utils.webhook import webhook_send
 from .gpt_image_node import FD_GTPImage
 from .gpt_image_combo_node import FD_GPTImageComboNode
@@ -397,7 +398,7 @@ class FD_Flux2KleinGenImage(ComfyNodeABC):
                 })
             except Exception:
                 pass
-        image_content = requests.get(result_url).content
+        image_content = requests.get(normalize_oss_url(result_url)).content
         image_bytesio = BytesIO(image_content)
         output_image = bytesio_to_image_tensor(image_bytesio)
         return (output_image,)
@@ -595,7 +596,7 @@ class FD_ZImageTurboGenImage(ComfyNodeABC):
                 })
             except Exception:
                 pass
-        image_content = requests.get(result_url).content
+        image_content = requests.get(normalize_oss_url(result_url)).content
         image_bytesio = BytesIO(image_content)
         output_image = bytesio_to_image_tensor(image_bytesio)
         return (output_image, result_url)
