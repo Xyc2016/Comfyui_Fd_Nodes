@@ -110,7 +110,7 @@ def test_exact_source_ratio_and_original_pixels(size, expected):
         try:
             assert all(output.size == expected for output in outputs)
             assert expected[0] * size[1] == expected[1] * size[0]
-            assert all(item["background_method"] == "source_edge_row_interpolation" for item in details["items"])
+            assert all(item["background_method"] == "source_adjacent_background_patches" for item in details["items"])
             offset = ((expected[0] - 20) // 2, (expected[1] - 20) // 2)
             with outputs[0].crop((offset[0], offset[1], offset[0] + 20, offset[1] + 20)) as crop:
                 assert crop.tobytes() == source.crop((10, 5, 30, 25)).tobytes()

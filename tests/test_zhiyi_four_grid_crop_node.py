@@ -153,7 +153,7 @@ def test_batch_rebuilds_background_from_source_without_extra_requests(monkeypatc
     assert torch.equal(results[0][0, 5:25, 10:30], frames[0, 5:25, 10:30])
     pixel = tuple((results[0][0, 0, 0] * 255).round().int().tolist())
     if gradient:
-        assert pixel == (41, 60, 80)
+        assert pixel == (40, 60, 80)
         assert results[0][0, 0, -1, 0] > results[0][0, 0, 0, 0]
     else:
         assert pixel == (80, 110, 140)

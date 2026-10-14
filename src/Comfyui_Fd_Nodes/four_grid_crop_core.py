@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from io import BytesIO
 import math
 from typing import Any
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageFilter
 
 ORDER = ("top_left", "top_right", "bottom_left", "bottom_right")
 
@@ -205,16 +205,57 @@ def _source_background_canvas(
     bounds: tuple[int, int, int, int],
     size: tuple[int, int],
 ) -> Image.Image:
-    """Continue per-row background colors sampled at both outer grid edges.
+    """用裁剪框周围的相邻背景生成画布，避免采到人物颜色。"""
+    cw, ch = size
+    x1, y1, x2, y2 = bounds
+    offset_x, offset_y = (cw - (x2 - x1)) // 2, (ch - (y2 - y1)) // 2
+    source_x = (region[0], x1, x2, region[2])
+    source_y = (region[1], y1, y2, region[3])
+    target_x = (0, offset_x, offset_x + x2 - x1, cw)
+    target_y = (0, offset_y, offset_y + y2 - y1, ch)
+    canvas = _edge_background_fallback(image, region, bounds, size)
 
-    Median edge samples resist isolated noise. A horizontal interpolation
-    continues subtle lighting changes; coordinates are clamped at grid edges.
-    The source crop itself is pasted unmodified after background construction.
-    """
+    def adjacent_segment(start: int, stop: int, required: int, segment: int) -> tuple[int, int]:
+        if stop - start > required:
+            if segment == 0:
+                start = stop - required
+            elif segment == 2:
+                stop = start + required
+        return start, stop
+
+    for row in range(3):
+        for column in range(3):
+            if row == column == 1:
+                continue
+            patch_width = target_x[column + 1] - target_x[column]
+            patch_height = target_y[row + 1] - target_y[row]
+            if patch_width <= 0 or patch_height <= 0:
+                continue
+            sx1, sx2 = adjacent_segment(source_x[column], source_x[column + 1], patch_width, column)
+            sy1, sy2 = adjacent_segment(source_y[row], source_y[row + 1], patch_height, row)
+            if sx2 <= sx1 or sy2 <= sy1:
+                continue
+            with image.crop((sx1, sy1, sx2, sy2)) as patch:
+                if patch.size != (patch_width, patch_height):
+                    resized = patch.resize((patch_width, patch_height), Image.Resampling.BILINEAR)
+                    canvas.paste(resized, (target_x[column], target_y[row]))
+                    resized.close()
+                else:
+                    canvas.paste(patch, (target_x[column], target_y[row]))
+    return canvas
+
+
+def _edge_background_fallback(
+    image: Image.Image,
+    region: tuple[int, int, int, int],
+    bounds: tuple[int, int, int, int],
+    size: tuple[int, int],
+) -> Image.Image:
+    """边缘无可用相邻背景时，避开裁剪框并平滑估计背景。"""
     left, top, right, bottom = region
     cw, ch = size
-    crop_w, crop_h = bounds[2] - bounds[0], bounds[3] - bounds[1]
-    offset_x, offset_y = (cw - crop_w) // 2, (ch - crop_h) // 2
+    crop_width, crop_height = bounds[2] - bounds[0], bounds[3] - bounds[1]
+    offset_x, offset_y = (cw - crop_width) // 2, (ch - crop_height) // 2
     strip = max(1, min(32, (right - left) // 20))
     left_x, right_x = left + (strip - 1) / 2, right - 1 - (strip - 1) / 2
 
@@ -223,31 +264,44 @@ def _source_background_canvas(
 
     t0 = fraction(bounds[0] - offset_x)
     t1 = fraction(bounds[0] - offset_x + cw - 1)
-    samples = {}
-    rows = []
+    samples: dict[int, tuple[tuple[int, ...], tuple[int, ...]]] = {}
+    rows: list[tuple[int, int, int]] = []
     for y in range(ch):
-        sy = min(bottom - 1, max(top, bounds[1] + y - offset_y))
-        if sy not in samples:
-            colors = []
-            for x in (left, right - strip):
-                histogram = image.crop((x, sy, x + strip, sy + 1)).histogram()
-                channels = []
+        sample_y = min(bottom - 1, max(top, bounds[1] + y - offset_y))
+        if sample_y not in samples:
+            intervals = [(left, left + strip), (right - strip, right)]
+            if bounds[1] <= sample_y < bounds[3]:
+                intervals = [
+                    (left, min(left + strip, bounds[0])),
+                    (max(right - strip, bounds[2]), right),
+                ]
+                intervals = [(start, stop) for start, stop in intervals if stop > start]
+                if not intervals:
+                    outside_rows = [row for row in (bounds[1] - 1, bounds[3]) if top <= row < bottom]
+                    if outside_rows:
+                        sample_y = min(outside_rows, key=lambda row: abs(row - sample_y))
+                    intervals = [(left, left + strip), (right - strip, right)]
+            colors: list[tuple[int, ...]] = []
+            for start, stop in intervals:
+                histogram = image.crop((start, sample_y, stop, sample_y + 1)).histogram()
+                channels: list[int] = []
                 for channel in range(3):
                     count = 0
                     for value, amount in enumerate(histogram[channel * 256 : (channel + 1) * 256]):
                         count += amount
-                        if count > strip // 2:
+                        if count > (stop - start) // 2:
                             channels.append(value)
                             break
                 colors.append(tuple(channels))
-            samples[sy] = colors
-        a, b = samples[sy]
-        rows.extend(tuple(round(a[c] + (b[c] - a[c]) * t) for c in range(3)) for t in (t0, t1))
+            samples[sample_y] = (colors[0], colors[-1])
+        first, second = samples[sample_y]
+        rows.extend(tuple(round(first[channel] + (second[channel] - first[channel]) * t) for channel in range(3)) for t in (t0, t1))
     background = Image.new("RGB", (2, ch))
     background.putdata(rows)
-    # Resize only the synthesized background, never the source crop.
-    canvas = background.resize((cw, ch), Image.Resampling.BILINEAR, box=(0.5, 0, 1.5, ch))
+    smoothed = background.filter(ImageFilter.GaussianBlur(radius=8))
     background.close()
+    canvas = smoothed.resize((cw, ch), Image.Resampling.BILINEAR, box=(0.5, 0, 1.5, ch))
+    smoothed.close()
     return canvas
 
 
@@ -360,7 +414,7 @@ def render_crop_canvases(
                 canvas = _source_background_canvas(rgb, region, bounds, size)
                 canvas.paste(crop, ((size[0] - crop.width) // 2, (size[1] - crop.height) // 2))
                 outputs.append(canvas)
-            item["background_method"] = "source_edge_row_interpolation"
+            item["background_method"] = "source_adjacent_background_patches"
     except Exception:
         for canvas in outputs:
             canvas.close()
