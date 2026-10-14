@@ -272,6 +272,9 @@ FD_OSS_URL_PATH_PREFIX_GEMINI
 | `gemini-3-pro-image-preview-official` | `google/gemini-3-pro-image-preview-official` |
 | `gemini-3-pro-image-preview-aistudio` | `google/gemini-3-pro-image-preview-official` |
 | `gemini-nano-banana-2.1` | `google/gemini-nano-banana-2.1` |
+| `gemini-nano-banana-2.1-siphonlab` | `gemini-nano-banana-2.1-siphonlab` |
+| `gemini-nano-banana-2.1-wdcloud` | `gemini-nano-banana-2.1-wdcloud` |
+| `gemini-nano-banana-2.1-vip` | `gemini-nano-banana-2.1-vip` |
 | `batch/gemini-3-pro-image-preview` | `batch/gemini-3-pro-image-preview` |
 
 建议你直接调用服务时使用最终模型名，减少歧义，例如：
@@ -283,7 +286,7 @@ google/gemini-3-pro-image-preview-official
 google/gemini-nano-banana-2.1
 ```
 
-`gemini-nano-banana-2.1` 是 image-server 的公开模型名，直连时服务端会接受裸名或 `google/gemini-nano-banana-2.1`。它只支持 `1K`、`2K`、`4K`；节点传入 `720P`/`1080P` 时分别映射为 `1K`/`2K`。编辑场景默认开启色彩偏移修正，关闭时显式传 `enable_color_bias_correction: false`。
+`gemini-nano-banana-2.1` 是 image-server 的公开模型名，直连时服务端会接受裸名或 `google/gemini-nano-banana-2.1`。它只支持 `1K`、`2K`、`4K`；节点传入 `720P`/`1080P` 时分别映射为 `1K`/`2K`。编辑场景默认开启色彩偏移修正，关闭时显式传 `enable_color_bias_correction: false`。显式渠道模型 `-siphonlab` / `-wdcloud` / `-vip` 锁定服务端渠道并保持原名发送（带 `google/` 前缀的变体也原样透传）；逆向渠道稳定性弱于官方，建议仅测试或容量兜底使用。
 
 
 这个模型不会调用 `FD_GEMINI_URL`：

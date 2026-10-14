@@ -94,6 +94,9 @@ class GeminiImageModel(str, Enum):
     batch_gemini_3_pro_image_preview_vip = "batch/gemini-3-pro-image-preview-vip"
     gemini_3_pro_image_preview_adobe = "gemini-3-pro-image-preview-adobe"
     gemini_nano_banana_2_1 = "gemini-nano-banana-2.1"
+    gemini_nano_banana_2_1_siphonlab = "gemini-nano-banana-2.1-siphonlab"
+    gemini_nano_banana_2_1_wdcloud = "gemini-nano-banana-2.1-wdcloud"
+    gemini_nano_banana_2_1_vip = "gemini-nano-banana-2.1-vip"
 
 
 def fd_gemini_send_webhook(gemini_req_body: dict):

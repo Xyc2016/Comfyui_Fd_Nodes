@@ -37,6 +37,7 @@ from src.Comfyui_Fd_Nodes.utils.error_utils import normalize_error_message
 from src.Comfyui_Fd_Nodes.utils.gemini_service import (
     GeminiImageServiceClient,
     compose_prompt,
+    is_nano_banana_model,
     normalize_gemini_model_name,
 )
 from src.Comfyui_Fd_Nodes.utils.litellm_gemini_image import should_use_litellm_gemini
@@ -583,6 +584,9 @@ def test_zhiyi_image_to_image_nodes_expose_legacy_and_channel_models():
         "batch/gemini-3-pro-image-preview-vip",
         "gemini-3-pro-image-preview-adobe",
         "gemini-nano-banana-2.1",
+        "gemini-nano-banana-2.1-siphonlab",
+        "gemini-nano-banana-2.1-wdcloud",
+        "gemini-nano-banana-2.1-vip",
     }
 
     assert expected_models.issubset(set(ZhiYiImageToImageNode.MODELS))
@@ -608,6 +612,14 @@ def test_zhiyi_image_to_image_nodes_expose_legacy_and_channel_models():
     assert vip_models.issubset(set(fd_models))
     assert fd_models.count("gemini-3-pro-image-preview-adobe") == 1
     assert fd_models.count("gemini-nano-banana-2.1") == 1
+    for channel_model in (
+        "gemini-nano-banana-2.1-siphonlab",
+        "gemini-nano-banana-2.1-wdcloud",
+        "gemini-nano-banana-2.1-vip",
+    ):
+        assert fd_models.count(channel_model) == 1
+        assert ZhiYiImageToImageNode.MODELS.count(channel_model) == 1
+        assert ZhiYiImageToImageComboNode.MODELS.count(channel_model) == 1
     assert ZhiYiImageToImageNode.MODELS.count("gemini-3-pro-image-preview-adobe") == 1
     assert ZhiYiImageToImageComboNode.MODELS.count("gemini-3-pro-image-preview-adobe") == 1
     for model in new_models:
@@ -823,6 +835,17 @@ def test_gemini_service_builds_internal_request_body():
     assert nano_body["enable_color_bias_correction"] is False
     assert nano_body["color_bias_reference_image_index"] == 3
 
+    nano_channel_body = client.build_request_body(
+        prompt="draw product",
+        model="google/gemini-nano-banana-2.1-siphonlab",
+        image_url_list=["https://oss/input.png"],
+        image_size="720P",
+        enable_color_bias_correction=False,
+    )
+    assert nano_channel_body["model"] == "google/gemini-nano-banana-2.1-siphonlab"
+    assert nano_channel_body["resolution"] == "1K"
+    assert nano_channel_body["enable_color_bias_correction"] is False
+
     aistudio_body = client.build_request_body(
         prompt="draw product",
         model="gemini-3-pro-image-preview-aistudio",
@@ -935,6 +958,20 @@ def test_gemini_service_model_and_prompt_helpers():
     assert normalize_gemini_model_name("gemini-3-pro-image-preview-aistudio") == "google/gemini-3-pro-image-preview-official"
     assert normalize_gemini_model_name("gemini-nano-banana-2.1") == "google/gemini-nano-banana-2.1"
     assert normalize_gemini_model_name("google/gemini-nano-banana-2.1") == "google/gemini-nano-banana-2.1"
+    for channel_model in (
+        "gemini-nano-banana-2.1-siphonlab",
+        "gemini-nano-banana-2.1-wdcloud",
+        "gemini-nano-banana-2.1-vip",
+    ):
+        assert normalize_gemini_model_name(channel_model) == channel_model
+        assert normalize_gemini_model_name(f"google/{channel_model}") == f"google/{channel_model}"
+        assert is_nano_banana_model(channel_model) is True
+        assert is_nano_banana_model(f"google/{channel_model}") is True
+        assert should_use_litellm_gemini(channel_model) is False
+        assert should_use_litellm_gemini(f"google/{channel_model}") is False
+    assert is_nano_banana_model("gemini-nano-banana-2.1") is True
+    assert is_nano_banana_model("google/gemini-nano-banana-2.1") is True
+    assert is_nano_banana_model("gemini-3-pro-image-preview") is False
     assert should_use_litellm_gemini("gemini-nano-banana-2.1") is False
     assert should_use_litellm_gemini("google/gemini-nano-banana-2.1") is False
     assert should_use_litellm_gemini("batch/gemini-3-pro-image-preview") is False

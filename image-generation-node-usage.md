@@ -577,6 +577,9 @@ gemini-3-pro-image-preview-official
 gemini-3-pro-image-preview-aistudio
 gemini-3-pro-image-preview-siphonlab
 gemini-nano-banana-2.1
+gemini-nano-banana-2.1-siphonlab
+gemini-nano-banana-2.1-wdcloud
+gemini-nano-banana-2.1-vip
 ```
 
 模型名归一化规则在：
@@ -597,7 +600,7 @@ gemini-nano-banana-2.1
 gemini-3-pro-image-preview-siphonlab
 ```
 
-新模型 `gemini-nano-banana-2.1` 走非 LiteLLM 的 Gemini image-server。它支持 `1K`、`2K`、`4K`；节点中的 `720P` 会映射为 `1K`，`1080P` 会映射为 `2K`。编辑场景默认开启色彩偏移修正，关闭时会显式传 `enable_color_bias_correction: false`。
+新模型 `gemini-nano-banana-2.1` 走非 LiteLLM 的 Gemini image-server。它支持 `1K`、`2K`、`4K`；节点中的 `720P` 会映射为 `1K`，`1080P` 会映射为 `2K`。编辑场景默认开启色彩偏移修正，关闭时会显式传 `enable_color_bias_correction: false`。显式渠道模型 `-siphonlab` / `-wdcloud` / `-vip` 锁定服务端渠道（逆向渠道稳定性弱于官方，建议仅测试或容量兜底使用）；裸名按上游公共入口权重分流，带 `google/` 前缀的变体原样透传。
 
 这类 LiteLLM 模型不上传 OSS 给 Gemini 图片服务，而是把图片转 base64，组装成多模态 messages 后请求：
 

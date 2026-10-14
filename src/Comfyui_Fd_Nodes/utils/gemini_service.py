@@ -28,9 +28,13 @@ MODEL_NAME_MAP = {
     "gemini-3-pro-image-preview-official": "google/gemini-3-pro-image-preview-official",
     "gemini-3.1-flash-image-preview": "google/gemini-3.1-flash-image-preview",
     "gemini-nano-banana-2.1": "google/gemini-nano-banana-2.1",
+    "gemini-nano-banana-2.1-siphonlab": "gemini-nano-banana-2.1-siphonlab",
+    "gemini-nano-banana-2.1-wdcloud": "gemini-nano-banana-2.1-wdcloud",
+    "gemini-nano-banana-2.1-vip": "gemini-nano-banana-2.1-vip",
 }
 
-NANO_BANANA_MODEL = "google/gemini-nano-banana-2.1"
+NANO_BANANA_MODEL_BASE = "gemini-nano-banana-2.1"
+NANO_BANANA_MODEL = f"google/{NANO_BANANA_MODEL_BASE}"
 NANO_BANANA_RESOLUTION_MAP = {
     "720P": "1K",
     "1080P": "2K",
@@ -69,7 +73,10 @@ def normalize_gemini_model_name(model: str) -> str:
 
 
 def is_nano_banana_model(model: str) -> bool:
-    return normalize_gemini_model_name(model) == NANO_BANANA_MODEL
+    normalized_model = normalize_gemini_model_name(model)
+    if normalized_model.startswith("google/"):
+        normalized_model = normalized_model[len("google/"):]
+    return normalized_model.startswith(NANO_BANANA_MODEL_BASE)
 
 
 def normalize_gemini_resolution(model: str, image_size: Optional[str]) -> Optional[str]:
