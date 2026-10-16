@@ -25,6 +25,7 @@ def make_client(**overrides):
 class OkResponse:
     def __init__(self, payload, status_code=200, text=""):
         self.payload = payload
+        self.content = payload if isinstance(payload, bytes) else b""
         self.status_code = status_code
         self.text = text or str(payload)
 
@@ -89,7 +90,7 @@ def test_edit_image_uploads_oss_then_posts_with_image_url_list(monkeypatch):
 
     def fake_upload(path, data):
         uploaded.append(path)
-        return f"https://oss.example.com/{path.split('/')[-1]}"
+        return f"https://oss.example.com/{len(uploaded)}.png"
 
     captured = {}
 
@@ -145,7 +146,11 @@ def test_edit_image_accepts_three_dim_tensor_from_batch_iteration():
         captured.append(json)
         return OkResponse({"status": True, "result_image_url": "https://example.com/result.png"})
 
-    client = make_client(request_post=fake_post, request_get=lambda url, timeout: OkResponse(b"x"))
+    client = make_client(
+        oss_uploader=lambda path, data: "https://oss.example.com/input.png",
+        request_post=fake_post,
+        request_get=lambda url, timeout: OkResponse(b"x"),
+    )
 
     images = [torch.zeros((2, 2, 3), dtype=torch.float32)]  # 3 维 (H, W, C)
     _, _ = client.edit_image(image_tensors=images, prompt="p", model="m", size="2K", ratio="3:4")

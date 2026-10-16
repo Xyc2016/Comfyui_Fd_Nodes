@@ -1060,18 +1060,14 @@ def test_zhiyi_image_to_image_derives_batch_item_ids_in_prompt_batch_order(monke
     )
 
     assert result.shape[0] == 4
-    assert [call["prompt"] for call in calls] == [
-        "prompt one",
-        "prompt one",
-        "prompt two",
-        "prompt two",
-    ]
-    assert [call["batch_item_id"] for call in calls] == [
-        "item-0",
-        "item-1",
-        "item-2",
-        "item-3",
-    ]
+    # Threads can start in any order; item IDs must still map to their prompts.
+    assert len(calls) == 4
+    assert {call["batch_item_id"]: call["prompt"] for call in calls} == {
+        "item-0": "prompt one",
+        "item-1": "prompt one",
+        "item-2": "prompt two",
+        "item-3": "prompt two",
+    }
     assert {call["batch_task_id"] for call in calls} == {"task-1"}
 
 
