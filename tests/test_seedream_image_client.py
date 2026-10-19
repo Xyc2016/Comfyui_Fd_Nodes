@@ -25,7 +25,6 @@ def make_client(**overrides):
 class OkResponse:
     def __init__(self, payload, status_code=200, text=""):
         self.payload = payload
-        self.content = payload if isinstance(payload, bytes) else b""
         self.status_code = status_code
         self.text = text or str(payload)
         self.content = text.encode("utf-8") or b"fake-image"
