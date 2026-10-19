@@ -109,7 +109,7 @@ def test_seedream_combo_single_request_maps_3k_to_2k(monkeypatch):
         aspect_ratio="1:1",
     )
 
-    assert captured[0][3]["size"] == "2K"
+    assert captured[0][2]["size"] == "2K"
 
 
 def test_seedream_combo_generate_reuses_uploaded_urls_and_keeps_combo_shape(monkeypatch):

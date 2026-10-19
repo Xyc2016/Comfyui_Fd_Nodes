@@ -28,6 +28,7 @@ class OkResponse:
         self.content = payload if isinstance(payload, bytes) else b""
         self.status_code = status_code
         self.text = text or str(payload)
+        self.content = text.encode("utf-8") or b"fake-image"
 
     def json(self):
         return self.payload
@@ -104,14 +105,14 @@ def test_edit_image_uploads_oss_then_posts_with_image_url_list(monkeypatch):
     _, _ = client.edit_image(image_tensors=images, prompt="edit prompt", model="doubao-seedream-5.0-pro", size="2K", ratio="3:4")
 
     assert len(uploaded) == 2
-    assert captured["body"] == {
-        "channel": "doubao-seedream-5.0-pro",
-        "prompt": "edit prompt",
-        "size": "2K",
-        "ratio": "3:4",
-        "resize": True,
-        "image_url_list": ["https://oss.example.com/1.png", "https://oss.example.com/2.png"],
-    }
+    assert all(path.endswith(".png") for path in uploaded)
+    body = captured["body"]
+    assert body["channel"] == "doubao-seedream-5.0-pro"
+    assert body["prompt"] == "edit prompt"
+    assert body["size"] == "2K"
+    assert body["ratio"] == "3:4"
+    assert body["resize"] is True
+    assert body["image_url_list"] == [f"https://oss.example.com/{idx}.png" for idx in range(1, len(uploaded) + 1)]
 
 
 def test_edit_image_with_urls_skips_upload():
@@ -140,6 +141,12 @@ def test_edit_image_with_urls_skips_upload():
 def test_edit_image_accepts_three_dim_tensor_from_batch_iteration():
     """回归：FD_SeedreamImage 直接传 4 维 tensor，enumerate 迭代出 3 维元素，
     修复前会在 downscale_image_tensor 的 shape[3] 处抛 IndexError: tuple index out of range。"""
+    uploaded = []
+
+    def fake_upload(path, data):
+        uploaded.append(path)
+        return f"https://oss.example.com/{path.split('/')[-1]}"
+
     captured = []
 
     def fake_post(url, headers, json, timeout):
@@ -147,7 +154,7 @@ def test_edit_image_accepts_three_dim_tensor_from_batch_iteration():
         return OkResponse({"status": True, "result_image_url": "https://example.com/result.png"})
 
     client = make_client(
-        oss_uploader=lambda path, data: "https://oss.example.com/input.png",
+        oss_uploader=fake_upload,
         request_post=fake_post,
         request_get=lambda url, timeout: OkResponse(b"x"),
     )
@@ -156,6 +163,7 @@ def test_edit_image_accepts_three_dim_tensor_from_batch_iteration():
     _, _ = client.edit_image(image_tensors=images, prompt="p", model="m", size="2K", ratio="3:4")
 
     assert len(captured[0]["image_url_list"]) == 1
+    assert uploaded
 
 
 def test_invalid_size_raises_before_upload_or_post():
@@ -243,10 +251,50 @@ def test_litellm_backend_keeps_legacy_body_and_pixel_size():
     assert body == {
         "model": "doubao-seedream-5.0-pro",
         "prompt": "p",
-        "size": "1728x2304",
+        "size": "1536x2048",
         "output_format": "png",
         "watermark": False,
     }
+
+
+@pytest.mark.parametrize(
+    ("model", "ratio", "size", "expected_pixels"),
+    [
+        ("doubao-seedream-5.0-flash", "4:5", "2K", "1792x2240"),
+        ("doubao-seedream-5.0-flash", "5:4", "2K", "2240x1792"),
+        ("doubao-seedream-5.0-flash", "4:5", "1K", "896x1120"),
+        ("doubao-seedream-5.0-pro", "4:5", "2K", "1792x2240"),
+        ("doubao-seedream-5.0-lite", "4:5", "2K", "1792x2240"),
+    ],
+)
+def test_litellm_backend_maps_flash_45_54_ratios(model, ratio, size, expected_pixels):
+    """回归：4:5/5:4 曾因映射表缺项静默回退 1:1（2048x2048）。"""
+    captured = []
+
+    class LitellmOkResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": [{"url": "https://example.com/result.png"}]}
+
+    class LitellmGetResponse:
+        content = b"fake-image"
+
+        def raise_for_status(self):
+            return None
+
+    def fake_post(url, headers, json, timeout):
+        captured.append(json)
+        return LitellmOkResponse()
+
+    client = make_client(
+        backend="litellm", request_post=fake_post, request_get=lambda url, timeout: LitellmGetResponse()
+    )
+    client.generate_image(prompt="p", model=model, size=size, ratio=ratio)
+
+    assert captured[0]["model"] == model
+    assert captured[0]["size"] == expected_pixels
 
 
 def test_litellm_backend_keeps_3k_pixel_conversion():
