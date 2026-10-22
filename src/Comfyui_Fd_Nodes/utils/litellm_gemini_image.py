@@ -10,7 +10,7 @@ from PIL import Image
 
 from ..config import FD_LITELLM_API_KEY, FD_LITELLM_BASE_URL
 from .error_utils import ERROR_NSFW, ERROR_TIMEOUT, normalize_error_message
-from .gemini_service import summarize_text
+from .gemini_service import summarize_text, validate_gemini_aspect_ratio
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +167,7 @@ def call_litellm_gemini_image(
         raise RuntimeError("未配置 base_url，请在环境变量 FD_LITELLM_BASE_URL 中设置")
     if not final_api_key or final_api_key == "your-api-key":
         raise RuntimeError("未配置 api_key，请在环境变量 FD_LITELLM_API_KEY 中设置")
+    validate_gemini_aspect_ratio(aspect_ratio)
 
     url = f"{final_base_url}/v1/chat/completions"
     payload = {

@@ -27,6 +27,7 @@ from .utils.gemini_service import (
     is_nano_banana_model,
     normalize_gemini_model_name,
     normalize_gemini_resolution,
+    validate_gemini_aspect_ratio,
     validate_gemini_batch_ids,
 )
 from .utils.logging_utils import configure_default_logging
@@ -186,7 +187,7 @@ class FD_GeminiImage(ComfyNodeABC):
                     IO.COMBO,
                     {
                         "default": "",
-                        "options": ["", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9", "9:21"],
+                        "options": ["", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9"],
                         "tooltip": "Optional aspect ratio for the generated image",
                     }
                 ),
@@ -253,6 +254,7 @@ class FD_GeminiImage(ComfyNodeABC):
         **kwargs,
     ):
         validate_gemini_batch_ids(model, batch_task_id, batch_item_id)
+        validate_gemini_aspect_ratio(aspect_ratio)
         normalized_model = normalize_gemini_model_name(model)
         body = {
             "out_request_id": out_request_id,

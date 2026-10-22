@@ -35,12 +35,14 @@ from src.Comfyui_Fd_Nodes.zhiyi_image_to_image_node import ZhiYiImageToImageNode
 from src.Comfyui_Fd_Nodes.zhiyi_text_node import ZhiYiTextGenNode
 from src.Comfyui_Fd_Nodes.utils.error_utils import normalize_error_message
 from src.Comfyui_Fd_Nodes.utils.gemini_service import (
+    GEMINI_SUPPORTED_ASPECT_RATIOS,
     GeminiImageServiceClient,
     compose_prompt,
     is_nano_banana_model,
     normalize_gemini_model_name,
+    validate_gemini_aspect_ratio,
 )
-from src.Comfyui_Fd_Nodes.utils.litellm_gemini_image import should_use_litellm_gemini
+from src.Comfyui_Fd_Nodes.utils.litellm_gemini_image import call_litellm_gemini_image, should_use_litellm_gemini
 from src.Comfyui_Fd_Nodes.utils.logging_utils import (
     DEFAULT_LOG_DATE_FORMAT,
     DEFAULT_LOG_FORMAT,
@@ -103,6 +105,53 @@ def test_gpt_aspect_ratios_include_9_21():
     assert resolution_to_edit_size("1K", "9:21") == "624x1456"
     assert resolution_to_edit_size("2K", "9:21") == "864x2016"
     assert resolution_to_edit_size("4K", "9:21") == "1648x3840"
+
+
+def test_gemini_nodes_only_offer_supported_aspect_ratios():
+    """Gemini 系节点不应提供上游不支持的比例（如 9:21，网关会静默丢弃导致出图跟随输入图比例）"""
+    gemini_node_ratios = {
+        ZhiYiImageToImageNode.__name__: ZhiYiImageToImageNode.ASPECT_RATIOS,
+        ZhiYiImageToImageComboNode.__name__: ZhiYiImageToImageComboNode.ASPECT_RATIOS,
+        FD_GeminiImage.__name__: FD_GeminiImage.INPUT_TYPES()["optional"]["aspect_ratio"][1]["options"],
+    }
+    for node_name, ratios in gemini_node_ratios.items():
+        unsupported = [r for r in ratios if r and r not in GEMINI_SUPPORTED_ASPECT_RATIOS]
+        assert unsupported == [], f"{node_name} 提供了 Gemini 不支持的比例: {unsupported}"
+
+
+def test_validate_gemini_aspect_ratio_rejects_unsupported():
+    with pytest.raises(ValueError, match="不支持宽高比 '9:21'"):
+        validate_gemini_aspect_ratio("9:21")
+
+
+def test_validate_gemini_aspect_ratio_accepts_supported_and_empty():
+    assert validate_gemini_aspect_ratio("3:4") == "3:4"
+    assert validate_gemini_aspect_ratio("") == ""
+    assert validate_gemini_aspect_ratio(None) == ""
+
+
+def test_gemini_request_body_rejects_unsupported_ratio():
+    client = GeminiImageServiceClient(service_url="http://example.invalid")
+    with pytest.raises(ValueError, match="9:21"):
+        client.build_request_body(
+            prompt="p",
+            model="google/gemini-3-pro-image-preview",
+            image_url_list=["http://example.invalid/1.png"],
+            aspect_ratio="9:21",
+        )
+
+
+def test_litellm_gemini_call_rejects_unsupported_ratio():
+    with pytest.raises(ValueError, match="9:21"):
+        call_litellm_gemini_image(
+            messages=[],
+            model="gemini-3-pro-image-preview-siphonlab",
+            aspect_ratio="9:21",
+            image_size="2K",
+            seed=0,
+            base_url="https://example.invalid",
+            api_key="test-key",
+        )
 
 
 def test_fd_gtp_image_requires_input_image():

@@ -85,8 +85,13 @@ def resolution_to_edit_size(resolution: str, aspect_ratio: str) -> str:
 def resolution_to_image_generation_edit_size(resolution: str, aspect_ratio: str = "") -> str:
     normalized_resolution = resolution if resolution in ("1K", "2K", "4K") else "2K"
     if normalized_resolution == "4K":
-        if aspect_ratio in ("16:9", "21:9"):
+        # 21:9 不能复用 16:9 的 3840x2160：网关对显式像素 size 直接透传、忽略 ratio，
+        # 错误的像素串会导致出图 16:9。3840x1648 与 resolution_to_edit_size 及网关
+        # ASPECT_RATIO_SIZE_TABLE 的 4K+21:9 档一致（edge 3840、16 倍数）。
+        if aspect_ratio == "16:9":
             return "3840x2160"
+        if aspect_ratio == "21:9":
+            return "3840x1648"
         if aspect_ratio == "9:16":
             return "2160x3840"
     return normalized_resolution

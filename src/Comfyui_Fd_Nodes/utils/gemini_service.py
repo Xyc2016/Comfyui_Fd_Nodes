@@ -41,6 +41,21 @@ NANO_BANANA_RESOLUTION_MAP = {
     "1080P": "2K",
 }
 
+# 与 image-generation 网关 /image/gemini_image 的白名单保持一致。
+# 上游 Google Gemini image 系列不支持 9:21 等比例；白名单外的比例网关会静默置空
+# （出图跟随输入图比例），所以这里提前显式报错，避免"选了比例但未生效"的静默错误。
+GEMINI_SUPPORTED_ASPECT_RATIOS = frozenset(
+    ["", "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"]
+)
+
+
+def validate_gemini_aspect_ratio(aspect_ratio):
+    value = str(aspect_ratio or "").strip()
+    if value not in GEMINI_SUPPORTED_ASPECT_RATIOS:
+        supported = ", ".join(r for r in sorted(GEMINI_SUPPORTED_ASPECT_RATIOS) if r)
+        raise ValueError(f"Gemini 渠道不支持宽高比 {value!r}（支持: {supported}）")
+    return value
+
 
 class GeminiImageServiceError(Exception):
     pass
@@ -171,6 +186,7 @@ class GeminiImageServiceClient:
     ) -> dict:
         normalized_model = normalize_gemini_model_name(model)
         validate_gemini_batch_ids(normalized_model, batch_task_id, batch_item_id)
+        validate_gemini_aspect_ratio(aspect_ratio)
         body = {
             "out_request_id": out_request_id or "default",
             "prompt": prompt,
