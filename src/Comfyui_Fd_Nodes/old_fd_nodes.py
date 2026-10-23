@@ -135,10 +135,9 @@ class FD_imgToText_Doubao:
     CATEGORY = "image/captioning"
 
     def gen(self, image_url, prompt, defaultPrompt):
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": "Bearer " + FD_DOUBAO_KEY,
-        }
+        headers = {"Content-Type": "application/json"}
+        if FD_DOUBAO_KEY:
+            headers["Authorization"] = "Bearer " + FD_DOUBAO_KEY
         req_params = {
             "text_prompt": prompt
             , "image_url": image_url
@@ -154,7 +153,11 @@ class FD_imgToText_Doubao:
             if data["status"] is not True:
                 print("上传错误请看上面提示错误或者关闭vpn")
                 return (defaultPrompt,)
-            return (data["response"]["Result"],)
+            # 老网关返回 response.Result；image-generation 的 image_to_text_doubao 返回 result_text
+            result = data.get("result_text")
+            if result is None:
+                result = data["response"]["Result"]
+            return (result,)
         except Exception as e:
             print(e)
             return (defaultPrompt,)
