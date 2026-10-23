@@ -1,10 +1,12 @@
 import logging
 import time
 import traceback
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
+from .config import FD_DOUBAO_VISION_URL
 from .config_manager import load_config
 from .utils.error_utils import normalize_error_message
 from .utils.logging_utils import configure_default_logging
@@ -217,6 +219,62 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
 
         raise RuntimeError(last_error or "API 请求失败")
 
+    def _single_request_via_image_generation(
+        self, vision_url, image_base64_list, text_prompt, retry_count, request_log
+    ):
+        """走 image-generation 的 /image/image_to_text_doubao（image_base64_list 多图）。
+        网络异常/5xx 按 retry_count 重试；INVALID_PARAMS 属参数问题不重试。"""
+        max_attempts = max(1, int(retry_count) + 1)
+        last_error = None
+
+        for attempt_index in range(max_attempts):
+            try:
+                logger.info(
+                    "Calling ZhiYi image-to-text combo via image-generation: %s",
+                    {**request_log, "attempt": attempt_index + 1, "max_attempts": max_attempts},
+                )
+                response = requests.post(
+                    url=vision_url,
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-request-id": uuid.uuid4().hex[:16],
+                    },
+                    json={"image_base64_list": image_base64_list, "text_prompt": text_prompt},
+                    timeout=(5, 120),
+                )
+                status_code = response.status_code
+                if status_code >= 500:
+                    last_error = RuntimeError(f"API 请求失败: {status_code}\n{response.text[:1000]}")
+                    if attempt_index < max_attempts - 1:
+                        self._sleep_before_retry(attempt_index)
+                        continue
+                    raise last_error
+                if not response.ok:
+                    raise RuntimeError(f"API 请求失败: {status_code}\n{response.text[:1000]}")
+                result = response.json()
+                if not result.get("status"):
+                    error = result.get("error") or {}
+                    raise RuntimeError(
+                        f"图生文服务失败: {error.get('code', 'UNKNOWN')} {error.get('message', '')}"
+                    )
+                logger.info(
+                    "ZhiYi image-to-text combo via image-generation response: %s",
+                    {"model": result.get("model"), "cost_time": result.get("cost_time")},
+                )
+                return result.get("result_text") or "", attempt_index
+            except requests.exceptions.RequestException as exc:
+                last_error = exc
+                if attempt_index < max_attempts - 1:
+                    logger.warning(
+                        "ZhiYi image-to-text combo via image-generation attempt %s/%s failed, retrying: %s",
+                        attempt_index + 1, max_attempts, exc,
+                    )
+                    self._sleep_before_retry(attempt_index)
+                    continue
+                raise RuntimeError(f"API 请求失败: {exc}") from exc
+
+        raise RuntimeError(last_error or "API 请求失败")
+
     def _run_concurrent(self, tasks, max_workers, label="请求"):
         results = {}
         log_lines = []
@@ -312,6 +370,39 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                     raise RuntimeError("无有效图片")
 
                 prompt = self._select_prompt(combo)
+                if FD_DOUBAO_VISION_URL:
+                    base64_list = []
+                    for image in expanded_images:
+                        data_url, image_info = self._image_tensor_to_data_url(
+                            image, max_data_url_bytes=8_000_000
+                        )
+                        image_info["combo"] = combo_slot
+                        logger.info(
+                            "ZhiYi image-to-text combo encoded image (image-generation): %s",
+                            image_info,
+                        )
+                        base64_list.append(data_url.split(",", 1)[1])
+                    system_text = (system_prompt or "").strip()
+                    text_prompt = f"{system_text}\n{prompt}" if system_text else prompt
+                    tasks.append(
+                        (
+                            result_index,
+                            combo_slot,
+                            self._single_request_via_image_generation,
+                            (
+                                FD_DOUBAO_VISION_URL,
+                                base64_list,
+                                text_prompt,
+                                retry_count,
+                                {
+                                    "url": FD_DOUBAO_VISION_URL,
+                                    "mode": "image-generation",
+                                    "image_count": len(base64_list),
+                                },
+                            ),
+                        )
+                    )
+                    continue
                 placeholder_messages = self._build_messages(
                     prompt, [""] * len(expanded_images), system_prompt
                 )

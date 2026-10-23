@@ -2,9 +2,11 @@ import requests
 import json
 import base64
 import logging
+import uuid
 import numpy as np
 from PIL import Image
 import io
+from .config import FD_DOUBAO_VISION_URL
 from .config_manager import load_config
 from .utils.logging_utils import configure_default_logging
 
@@ -268,10 +270,48 @@ class ZhiYiImageTextNode:
             summary["content_length"] = len(content)
         return summary
 
+    def _generate_via_image_generation(self, image, prompt, system_prompt=""):
+        """走 image-generation 的 /image/image_to_text_doubao（image_base64 单图）。
+        服务端自适应国内外模型名写法并内置超时重试，这里只透传错误。"""
+        data_url, image_info = self._image_tensor_to_data_url(
+            image, max_data_url_bytes=8_000_000
+        )
+        image_base64 = data_url.split(",", 1)[1]
+        system_text = (system_prompt or "").strip()
+        text_prompt = f"{system_text}\n{prompt}" if system_text else prompt
+        request_id = uuid.uuid4().hex[:16]
+        logger.info(
+            "ZhiYi image-to-text via image-generation: %s",
+            {"url": FD_DOUBAO_VISION_URL, "x-request-id": request_id, "image": image_info},
+        )
+        response = requests.post(
+            url=FD_DOUBAO_VISION_URL,
+            headers={"Content-Type": "application/json", "x-request-id": request_id},
+            json={"image_base64": image_base64, "text_prompt": text_prompt},
+            timeout=(5, 120),
+        )
+        if not response.ok:
+            raise RuntimeError(f"API 请求失败: {response.status_code}\n{response.text[:1000]}")
+        result = response.json()
+        if not result.get("status"):
+            error = result.get("error") or {}
+            raise RuntimeError(
+                f"图生文服务失败: {error.get('code', 'UNKNOWN')} {error.get('message', '')}"
+            )
+        logger.info(
+            "ZhiYi image-to-text via image-generation response summary: %s",
+            {"model": result.get("model"), "cost_time": result.get("cost_time"),
+             "text_length": len(result.get("result_text") or "")},
+        )
+        return (result.get("result_text") or "",)
+
     def generate(self, image, prompt, node_switch=1,
                  system_prompt="", temperature=0.7, max_tokens=2048):
         if node_switch == 1:
             return ("",)
+
+        if FD_DOUBAO_VISION_URL:
+            return self._generate_via_image_generation(image, prompt, system_prompt)
 
         cfg = load_config()
         base_url = cfg["base_url"]
