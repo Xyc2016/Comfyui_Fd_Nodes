@@ -165,6 +165,13 @@ class FD_RemoveWatermark:
         fallback_to_original: bool,
         jpeg_quality: int,
     ) -> Tuple[torch.Tensor]:
+        from .utils.url_utils import is_url_delivery_required
+
+        if is_url_delivery_required():
+            raise NotImplementedError(
+                "Unsupported: FD_RemoveWatermark 的 /v1/process 仅支持 multipart 图片，"
+                "海外 URL-only 模式禁止发送文件；需先部署支持图片 URL 的去水印接口"
+            )
         call_id = str(uuid4())[:8]
         print(
             f"FD_RemoveWatermark [{call_id}] Start processing. ",

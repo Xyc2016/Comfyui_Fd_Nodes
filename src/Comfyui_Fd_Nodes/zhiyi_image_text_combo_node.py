@@ -10,6 +10,12 @@ from .config import FD_DOUBAO_VISION_URL
 from .config_manager import load_config
 from .utils.error_utils import normalize_error_message
 from .utils.logging_utils import configure_default_logging
+from .utils.image_payload import (
+    IMAGE_DELIVERY_OPTIONS,
+    IMAGE_DELIVERY_URL,
+    image_delivery_input_config,
+    resolve_image_delivery,
+)
 from .zhiyi_image_text_node import MAX_REQUEST_BODY_BYTES, ZhiYiImageTextNode
 
 configure_default_logging()
@@ -73,6 +79,7 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                     "default": "",
                     "multiline": True,
                 }),
+                "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
             },
         }
 
@@ -220,10 +227,13 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
         raise RuntimeError(last_error or "API 请求失败")
 
     def _single_request_via_image_generation(
-        self, vision_url, image_base64_list, text_prompt, retry_count, request_log
+        self, vision_url, image_base64_list, text_prompt, retry_count, request_log,
+        image_delivery=None,
     ):
-        """走 image-generation 的 /image/image_to_text_doubao（image_base64_list 多图）。
+        """走 image-generation 的多图 URL 或国内 base64 契约。
         网络异常/5xx 按 retry_count 重试；INVALID_PARAMS 属参数问题不重试。"""
+        image_delivery = resolve_image_delivery(image_delivery)
+        image_key = "image_url_list" if image_delivery == IMAGE_DELIVERY_URL else "image_base64_list"
         max_attempts = max(1, int(retry_count) + 1)
         last_error = None
 
@@ -239,7 +249,7 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                         "Content-Type": "application/json",
                         "x-request-id": uuid.uuid4().hex[:16],
                     },
-                    json={"image_base64_list": image_base64_list, "text_prompt": text_prompt},
+                    json={image_key: image_base64_list, "text_prompt": text_prompt},
                     timeout=(5, 120),
                 )
                 status_code = response.status_code
@@ -331,10 +341,12 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
         combo_7=None,
         combo_8=None,
         system_prompt="",
+        image_delivery=None,
     ):
         if node_switch == 1:
             return ("", "node skipped")
 
+        image_delivery = resolve_image_delivery(image_delivery)
         cfg = load_config()
         base_url = cfg["base_url"].rstrip("/")
         api_key = cfg["api_key"]
@@ -371,17 +383,19 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
 
                 prompt = self._select_prompt(combo)
                 if FD_DOUBAO_VISION_URL:
-                    base64_list = []
+                    image_refs = []
                     for image in expanded_images:
-                        data_url, image_info = self._image_tensor_to_data_url(
-                            image, max_data_url_bytes=8_000_000
+                        image_ref, image_info = self._prepare_image_reference(
+                            image, image_delivery, 8_000_000
                         )
                         image_info["combo"] = combo_slot
                         logger.info(
                             "ZhiYi image-to-text combo encoded image (image-generation): %s",
                             image_info,
                         )
-                        base64_list.append(data_url.split(",", 1)[1])
+                        image_refs.append(
+                            image_ref if image_delivery == IMAGE_DELIVERY_URL else image_ref.split(",", 1)[1]
+                        )
                     system_text = (system_prompt or "").strip()
                     text_prompt = f"{system_text}\n{prompt}" if system_text else prompt
                     tasks.append(
@@ -391,14 +405,15 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                             self._single_request_via_image_generation,
                             (
                                 FD_DOUBAO_VISION_URL,
-                                base64_list,
+                                image_refs,
                                 text_prompt,
                                 retry_count,
                                 {
                                     "url": FD_DOUBAO_VISION_URL,
                                     "mode": "image-generation",
-                                    "image_count": len(base64_list),
+                                    "image_count": len(image_refs),
                                 },
+                                image_delivery,
                             ),
                         )
                     )
@@ -416,8 +431,8 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                 data_urls = []
                 image_infos = []
                 for image in expanded_images:
-                    data_url, image_info = self._image_tensor_to_data_url(
-                        image, max_data_url_bytes=image_budget
+                    data_url, image_info = self._prepare_image_reference(
+                        image, image_delivery, image_budget
                     )
                     data_urls.append(data_url)
                     image_infos.append(image_info)

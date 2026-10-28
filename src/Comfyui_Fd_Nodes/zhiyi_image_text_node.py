@@ -9,6 +9,13 @@ import io
 from .config import FD_DOUBAO_VISION_URL
 from .config_manager import load_config
 from .utils.logging_utils import configure_default_logging
+from .utils.image_payload import (
+    IMAGE_DELIVERY_OPTIONS,
+    IMAGE_DELIVERY_URL,
+    image_delivery_input_config,
+    resolve_image_delivery,
+    tensor_to_image_payload,
+)
 
 configure_default_logging()
 logger = logging.getLogger(__name__)
@@ -58,6 +65,7 @@ class ZhiYiImageTextNode:
                     "max": 8192,
                     "step": 1,
                 }),
+                "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
             },
         }
 
@@ -270,13 +278,21 @@ class ZhiYiImageTextNode:
             summary["content_length"] = len(content)
         return summary
 
-    def _generate_via_image_generation(self, image, prompt, system_prompt=""):
-        """走 image-generation 的 /image/image_to_text_doubao（image_base64 单图）。
-        服务端自适应国内外模型名写法并内置超时重试，这里只透传错误。"""
-        data_url, image_info = self._image_tensor_to_data_url(
-            image, max_data_url_bytes=8_000_000
+    def _prepare_image_reference(self, image, image_delivery, max_data_url_bytes):
+        if image_delivery == IMAGE_DELIVERY_URL:
+            url = tensor_to_image_payload(image, image_delivery, internal=False)
+            return url, {"image_delivery": IMAGE_DELIVERY_URL}
+        return self._image_tensor_to_data_url(image, max_data_url_bytes=max_data_url_bytes)
+
+    def _generate_via_image_generation(self, image, prompt, system_prompt="", image_delivery=None):
+        """走 image-generation：URL 原样透传 LiteLLM，国内保留 base64。"""
+        image_delivery = resolve_image_delivery(image_delivery)
+        image_ref, image_info = self._prepare_image_reference(image, image_delivery, 8_000_000)
+        image_payload = (
+            {"image_url": image_ref}
+            if image_delivery == IMAGE_DELIVERY_URL
+            else {"image_base64": image_ref.split(",", 1)[1]}
         )
-        image_base64 = data_url.split(",", 1)[1]
         system_text = (system_prompt or "").strip()
         text_prompt = f"{system_text}\n{prompt}" if system_text else prompt
         request_id = uuid.uuid4().hex[:16]
@@ -287,7 +303,7 @@ class ZhiYiImageTextNode:
         response = requests.post(
             url=FD_DOUBAO_VISION_URL,
             headers={"Content-Type": "application/json", "x-request-id": request_id},
-            json={"image_base64": image_base64, "text_prompt": text_prompt},
+            json={**image_payload, "text_prompt": text_prompt},
             timeout=(5, 120),
         )
         if not response.ok:
@@ -306,12 +322,13 @@ class ZhiYiImageTextNode:
         return (result.get("result_text") or "",)
 
     def generate(self, image, prompt, node_switch=1,
-                 system_prompt="", temperature=0.7, max_tokens=2048):
+                 system_prompt="", temperature=0.7, max_tokens=2048, image_delivery=None):
         if node_switch == 1:
             return ("",)
 
+        image_delivery = resolve_image_delivery(image_delivery)
         if FD_DOUBAO_VISION_URL:
-            return self._generate_via_image_generation(image, prompt, system_prompt)
+            return self._generate_via_image_generation(image, prompt, system_prompt, image_delivery)
 
         cfg = load_config()
         base_url = cfg["base_url"]
@@ -324,9 +341,7 @@ class ZhiYiImageTextNode:
             placeholder_messages, temperature, max_tokens
         )
         image_budget = self._image_budget(placeholder_payload, 1)
-        data_url, image_info = self._image_tensor_to_data_url(
-            image, max_data_url_bytes=image_budget
-        )
+        data_url, image_info = self._prepare_image_reference(image, image_delivery, image_budget)
         messages = self._build_messages(prompt, [data_url], system_prompt)
         payload = self._build_request_payload(messages, temperature, max_tokens)
         request_body, request_body_bytes = self._serialize_request_body(

@@ -11,6 +11,8 @@ from PIL import Image
 from ..config import FD_LITELLM_API_KEY, FD_LITELLM_BASE_URL
 from .error_utils import ERROR_NSFW, ERROR_TIMEOUT, normalize_error_message
 from .gemini_service import summarize_text, validate_gemini_aspect_ratio
+from .image_payload import IMAGE_DELIVERY_URL, require_http_image_url, tensor_to_image_payload
+from .url_utils import is_url_delivery_required
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,9 @@ def should_use_litellm_gemini(model: str) -> bool:
 
 
 def tensor_to_base64(image_tensor) -> str:
+    """保留旧调用名；海外返回原尺寸 OSS URL，国内保留 PNG base64。"""
+    if is_url_delivery_required():
+        return tensor_to_image_payload(image_tensor, IMAGE_DELIVERY_URL, internal=False)
     if image_tensor.ndim == 4:
         image_tensor = image_tensor[0]
     arr = (image_tensor.detach().cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
@@ -142,9 +147,13 @@ def build_litellm_messages(prompt: str, image_b64_list: list[str], system_prompt
         })
     user_content = [{"type": "text", "text": prompt}]
     for b64 in image_b64_list:
+        if is_url_delivery_required() or b64.startswith(("http://", "https://")):
+            image_ref = require_http_image_url(b64)
+        else:
+            image_ref = f"data:image/png;base64,{b64}"
         user_content.append({
             "type": "image_url",
-            "image_url": {"url": f"data:image/png;base64,{b64}"},
+            "image_url": {"url": image_ref},
         })
     messages.append({"role": "user", "content": user_content})
     return messages
