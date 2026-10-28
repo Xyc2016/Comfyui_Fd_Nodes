@@ -90,6 +90,10 @@ def _derive_image_generate_url() -> str:
 FD_IMAGE_GENERATE_URL = os.getenv("FD_IMAGE_GENERATE_URL") or _derive_image_generate_url()
 
 FD_OSS_URL_PATH_PREFIX_BEFORE_GEN = os.getenv("FD_OSS_URL_PATH_PREFIX_BEFORE_GEN", "devops/comfyui/segment_img")
+FD_OSS_URL_PATH_PREFIX_GPU_INPUT = os.getenv("FD_OSS_URL_PATH_PREFIX_GPU_INPUT", "devops/comfyui/segment_img")
+# GPU 图像服务启用鉴权后注入（SAM2 服务与图像预处理服务各自的 key），未配置则不带 Authorization 头
+FD_SAM2_API_KEY = os.getenv("FD_SAM2_API_KEY")
+FD_DWPOSE_API_KEY = os.getenv("FD_DWPOSE_API_KEY")
 FD_AISTUDIO_PUBLISH_URL = os.getenv("FD_AISTUDIO_PUBLISH_URL", "http://121.40.67.98:2003/api/tasks/publish")
 FD_REMOVE_BG_BY_MEITU_URL = os.getenv(
     "FD_REMOVE_BG_BY_MEITU_URL",
@@ -99,6 +103,15 @@ FD_OSS_URL_PATH_PREFIX_REMOVE_BG = os.getenv("FD_OSS_URL_PATH_PREFIX_REMOVE_BG",
 FD_SAM2_SEGMENT_URL = os.getenv("FD_SAM2_SEGMENT_URL", "http://model-api-sam2-hiera-base-plus-svc.online-server-gray:8000/v1/segment")
 DEFAULT_DWPOSE_POSE_URL = "http://model-api-dwpose-svc.online-server-gray:8001/v1/pose"
 FD_DWPOSE_POSE_URL = os.getenv("FD_DWPOSE_POSE_URL") or DEFAULT_DWPOSE_POSE_URL
+
+# 海外部署（美国业务 IP）走杭州 GPU 公网网关，路径前缀 /gpu/{namespace}/{service}，
+# 后续 /v1/* 路径由网关透传，节点侧 URL 归一化逻辑会自动补全。
+FD_OVERSEAS_GPU_GATEWAY = os.getenv(
+    "FD_OVERSEAS_GPU_GATEWAY",
+    "http://fd-oversease-access-hz.external.sometimes.cn/gpu/online-server-gray",
+).rstrip("/")
+FD_OVERSEAS_SAM2_URL = f"{FD_OVERSEAS_GPU_GATEWAY}/model-api-sam2-hiera-base-plus"
+FD_OVERSEAS_DWPOSE_URL = f"{FD_OVERSEAS_GPU_GATEWAY}/model-api-dwpose"
 
 
 def _derive_dwpose_preprocess_url(endpoint: str) -> str:
@@ -133,6 +146,7 @@ FD_BODY_SEGMENT_URL = os.getenv("FD_BODY_SEGMENT_URL", "http://10.1.0.230:8003/v
 CUSTOM_SERVICE_URL_PRESET = "自定义（使用 service_url）"
 DWPOSE_SERVICE_URL_PRESETS = (
     ("K8s 灰度", "http://model-api-dwpose-svc.online-server-gray:8001"),
+    ("海外接入", FD_OVERSEAS_DWPOSE_URL),
     ("10.1.0.230", "http://10.1.0.230:8003"),
 )
 RMBG_SERVICE_URL_PRESETS = (
@@ -142,14 +156,17 @@ RMBG_SERVICE_URL_PRESETS = (
 DWPOSE_SERVICE_ENVS = {
     "gray": "http://model-api-dwpose-svc.online-server-gray:8001",
     "dev": "http://10.1.0.230:8003",
+    "overseas": FD_OVERSEAS_DWPOSE_URL,
 }
 RMBG_SERVICE_ENVS = {
     "gray": "http://model-api-dwpose-svc.online-server-gray:8001",
     "dev": "http://10.1.0.230:8003",
+    "overseas": FD_OVERSEAS_DWPOSE_URL,
 }
 SAM2_SERVICE_ENVS = {
     "gray": "http://model-api-sam2-hiera-base-plus-svc.online-server-gray:8000",
     "dev": "http://10.1.0.230:8002",
+    "overseas": FD_OVERSEAS_SAM2_URL,
 }
 
 assert FD_LITELLM_BASE_URL, "FD_LITELLM_BASE_URL is not set"

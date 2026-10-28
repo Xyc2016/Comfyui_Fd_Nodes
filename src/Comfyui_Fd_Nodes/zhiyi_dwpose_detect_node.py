@@ -12,8 +12,15 @@ import requests
 import torch
 from PIL import Image
 
-from .config import CUSTOM_SERVICE_URL_PRESET, DWPOSE_SERVICE_URL_PRESETS, FD_DWPOSE_POSE_URL
+from .config import CUSTOM_SERVICE_URL_PRESET, DWPOSE_SERVICE_URL_PRESETS, FD_DWPOSE_API_KEY, FD_DWPOSE_POSE_URL
 from .utils.error_utils import ERROR_TIMEOUT, normalize_error_message
+from .utils.image_payload import (
+    IMAGE_DELIVERY_BASE64,
+    IMAGE_DELIVERY_OPTIONS,
+    auth_headers,
+    image_delivery_input_config,
+    tensor_to_image_payload,
+)
 from .utils.logging_utils import configure_default_logging
 from .utils.service_url import resolve_service_url_preset, service_url_preset_options
 
@@ -107,6 +114,7 @@ class ZhiYiDWPoseDetectNode:
                     "default": CUSTOM_SERVICE_URL_PRESET,
                     "tooltip": "选择部署预设时忽略 service_url；选择自定义时使用 service_url 文本框",
                 }),
+                "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
             },
         }
 
@@ -145,11 +153,7 @@ class ZhiYiDWPoseDetectNode:
         return Image.fromarray(arr[..., :3]).convert("RGB")
 
     def _tensor_to_png_data_url(self, image_tensor):
-        image = self._image_tensor_to_rgb_pil(image_tensor)
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
-        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-        return f"data:image/png;base64,{encoded}"
+        return tensor_to_image_payload(image_tensor, IMAGE_DELIVERY_BASE64)
 
     def _decode_png_data_url(self, value, field_name):
         if not isinstance(value, str) or not value:
@@ -172,7 +176,7 @@ class ZhiYiDWPoseDetectNode:
 
     def _build_payload(
         self,
-        image_data_url,
+        image,
         resolution,
         detect_body,
         detect_hand,
@@ -185,7 +189,7 @@ class ZhiYiDWPoseDetectNode:
         if upscale_method not in UPSCALE_METHODS:
             raise RuntimeError(f"upscale_method 无效: {upscale_method}")
         return {
-            "image": image_data_url,
+            "image": image,
             "resolution": int(resolution),
             "detect_body": bool(detect_body),
             "detect_hand": bool(detect_hand),
@@ -251,7 +255,7 @@ class ZhiYiDWPoseDetectNode:
         response = self._request_with_retry(
             "POST",
             service_url,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", **auth_headers(FD_DWPOSE_API_KEY)},
             json=payload,
             timeout=timeout,
             retry_count=1,
@@ -270,7 +274,9 @@ class ZhiYiDWPoseDetectNode:
 
     def _check_health(self, service_url, timeout):
         health_url = _health_url(service_url)
-        response = self._request_with_retry("GET", health_url, timeout=timeout, retry_count=0)
+        response = self._request_with_retry(
+            "GET", health_url, timeout=timeout, retry_count=0, headers=auth_headers(FD_DWPOSE_API_KEY),
+        )
         if response.status_code >= 400:
             raise RuntimeError(f"DWPose health check 失败: {response.status_code}\n{response.text[:500]}")
         try:
@@ -294,11 +300,12 @@ class ZhiYiDWPoseDetectNode:
         timeout,
         return_pose_image=True,
         return_openpose_json=True,
+        image_delivery=IMAGE_DELIVERY_BASE64,
     ):
         original_image = self._image_tensor_to_rgb_pil(image_tensor)
-        image_data_url = self._tensor_to_png_data_url(image_tensor)
+        image_value = tensor_to_image_payload(image_tensor, image_delivery)
         payload = self._build_payload(
-            image_data_url,
+            image_value,
             resolution,
             detect_body,
             detect_hand,
@@ -308,7 +315,10 @@ class ZhiYiDWPoseDetectNode:
             return_pose_image,
             return_openpose_json,
         )
-        logger.info("Calling DWPose API idx=%s service_url=%s resolution=%s", idx, service_url, resolution)
+        logger.info(
+            "Calling DWPose API idx=%s service_url=%s resolution=%s image_delivery=%s",
+            idx, service_url, resolution, image_delivery,
+        )
         result = self._post_pose(
             service_url,
             payload,
@@ -392,6 +402,7 @@ class ZhiYiDWPoseDetectNode:
         health_check=False,
         node_switch=0,
         service_url_preset=None,
+        image_delivery=IMAGE_DELIVERY_BASE64,
     ):
         if node_switch == 1:
             return (
@@ -428,6 +439,9 @@ class ZhiYiDWPoseDetectNode:
                     xinsr_stick_scaling,
                     upscale_method,
                     timeout,
+                    True,
+                    True,
+                    image_delivery,
                 ),
             ))
 
@@ -435,6 +449,7 @@ class ZhiYiDWPoseDetectNode:
         results = self._run_concurrent(tasks, max_concurrency)
         info = {
             "service_url": final_service_url,
+            "image_delivery": image_delivery,
             "resolution": int(resolution),
             "detect_body": bool(detect_body),
             "detect_hand": bool(detect_hand),

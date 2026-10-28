@@ -1,5 +1,6 @@
 import base64
 import io
+import inspect
 import json
 
 import pytest
@@ -10,6 +11,13 @@ from PIL import Image
 from src.Comfyui_Fd_Nodes import zhiyi_rmbg_segment_node as rmbg_module
 from src.Comfyui_Fd_Nodes.config import CUSTOM_SERVICE_URL_PRESET
 from src.Comfyui_Fd_Nodes.nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+from src.Comfyui_Fd_Nodes.utils import image_payload
+from src.Comfyui_Fd_Nodes.v2.rmbg_segment_v2_node import (
+    ZhiYiBodySegmentNodeV2,
+    ZhiYiClothesSegmentNodeV2,
+    ZhiYiFashionSegmentNodeV2,
+    ZhiYiRMBGNodeV2,
+)
 from src.Comfyui_Fd_Nodes.zhiyi_rmbg_segment_node import (
     BODY_CLASSES,
     CLOTHES_CLASSES,
@@ -117,7 +125,7 @@ def test_rmbg_and_segment_node_metadata():
         "max_concurrency",
         "timeout",
     ]
-    assert list(body_inputs["optional"]) == ["health_check", "node_switch", "service_url_preset"]
+    assert list(body_inputs["optional"]) == ["health_check", "node_switch", "service_url_preset", "image_delivery"]
     assert body_inputs["required"]["service_url"][0] == "STRING"
     assert body_inputs["required"]["classes"][0] == "STRING"
     assert "忽略 process_res" in body_inputs["required"]["process_res"][1]["tooltip"]
@@ -133,7 +141,7 @@ def test_rmbg_and_segment_node_metadata():
         assert node_cls.RETURN_TYPES == ("IMAGE", "MASK", "IMAGE", "JSON")
         assert node_cls.RETURN_NAMES == ("IMAGE", "MASK", "MASK_IMAGE", "INFO")
         input_types = node_cls.INPUT_TYPES()
-        assert list(input_types["optional"])[-1] == "service_url_preset"
+        assert list(input_types["optional"])[-2:] == ["service_url_preset", "image_delivery"]
         preset_options, preset_config = input_types["optional"]["service_url_preset"]
         assert preset_options == [CUSTOM_SERVICE_URL_PRESET, "10.1.0.230"]
         assert preset_config["default"] == CUSTOM_SERVICE_URL_PRESET
@@ -494,3 +502,193 @@ def test_timeout_is_normalized(monkeypatch):
             health_check=False,
             node_switch=0,
         )
+
+
+_DELIVERY_CASES = [
+    (ZhiYiRMBGNode, "rmbg", "rmbg"),
+    (ZhiYiClothesSegmentNode, "segment/clothes", "clothes_segment"),
+    (ZhiYiFashionSegmentNode, "segment/fashion", "fashion_segment"),
+    (ZhiYiBodySegmentNode, "segment/body", "body_segment"),
+    (ZhiYiRMBGNodeV2, "rmbg", "rmbg"),
+    (ZhiYiClothesSegmentNodeV2, "segment/clothes", "clothes_segment"),
+    (ZhiYiFashionSegmentNodeV2, "segment/fashion", "fashion_segment"),
+    (ZhiYiBodySegmentNodeV2, "segment/body", "body_segment"),
+]
+
+
+def _delivery_node_kwargs(node, **overrides):
+    inputs = node.INPUT_TYPES()
+    kwargs = {
+        name: spec[1]["default"]
+        for name, spec in inputs["required"].items()
+        if name != "image"
+    }
+    # 故意不填 image_delivery：旧工作流省略该参数时应继续使用 base64。
+    kwargs.update(
+        image=torch.zeros((1, 3, 5, 3), dtype=torch.float32),
+        service_url="https://example.com/api",
+        background="Color",
+        background_color="#000000",
+        timeout=30,
+    )
+    if "env" in kwargs:
+        kwargs["env"] = "custom"
+    kwargs.update(overrides)
+    return kwargs
+
+
+@pytest.mark.parametrize("node_cls,endpoint,health_key", _DELIVERY_CASES)
+def test_image_delivery_appended_and_default_preserves_signature(node_cls, endpoint, health_key):
+    inputs = node_cls.INPUT_TYPES()
+    is_v2 = "env" in inputs["required"]
+    old_optional = ["health_check", "node_switch"]
+    if not is_v2:
+        old_optional.append("service_url_preset")
+    assert list(inputs["optional"]) == old_optional + ["image_delivery"]
+    options, config = inputs["optional"]["image_delivery"]
+    assert options == ["base64", "url"]
+    assert config == image_payload.image_delivery_input_config()
+    method = getattr(node_cls, node_cls.FUNCTION)
+    parameters = inspect.signature(method).parameters
+    assert list(parameters) == ["self", *inputs["required"], *inputs["optional"]]
+    assert parameters["image_delivery"].default == "base64"
+
+
+@pytest.mark.parametrize("node_cls,endpoint,health_key", _DELIVERY_CASES)
+def test_url_delivery_posts_png_url_and_authenticates_health(monkeypatch, node_cls, endpoint, health_key):
+    node = node_cls()
+    image = torch.linspace(-0.1, 1.1, 3 * 5 * 4).reshape(1, 3, 5, 4)
+    uploads = []
+    calls = []
+    image_url = "https://oss.example.com/input.png"
+    legacy_png = io.BytesIO()
+    node._image_tensor_to_rgb_pil(image).save(legacy_png, format="PNG")
+
+    def fake_upload(png_bytes):
+        uploads.append(png_bytes)
+        assert png_bytes == legacy_png.getvalue()
+        with Image.open(io.BytesIO(png_bytes)) as png:
+            assert png.format == "PNG"
+            assert png.mode == "RGB"
+            assert png.size == (5, 3)
+        return image_url
+
+    def fake_request(method, url, timeout, **kwargs):
+        calls.append((method, url))
+        assert timeout == 30
+        assert kwargs["headers"]["Authorization"] == "Bearer test-rmbg-key"
+        if method == "GET":
+            assert kwargs["headers"] == {"Authorization": "Bearer test-rmbg-key"}
+            return DummyResponse(data={health_key: {"loaded": True}})
+        assert method == "POST"
+        assert kwargs["headers"]["Content-Type"] == "application/json"
+        payload = kwargs["json"]
+        assert payload["image"] == image_url
+        assert payload["image_format"] == "png_base64"
+        assert payload["return_image"] is True
+        assert payload["return_mask"] is True
+        assert payload["return_mask_image"] is False
+        if endpoint == "rmbg":
+            assert payload["sensitivity"] == 1.0
+            assert payload["refine_foreground"] is False
+        else:
+            assert payload["classes"]
+        return DummyResponse(data=_segment_response(size=(5, 3), request_id="url-test"))
+
+    monkeypatch.setattr(image_payload, "_upload_png_bytes_to_oss_url", fake_upload)
+    monkeypatch.setattr(rmbg_module, "FD_DWPOSE_API_KEY", " test-rmbg-key ")
+    monkeypatch.setattr(rmbg_module.requests, "request", fake_request)
+    result, mask, mask_image, info_text = getattr(node, node.FUNCTION)(
+        **_delivery_node_kwargs(node, image=image, image_delivery="url", health_check=True)
+    )
+
+    assert len(uploads) == 1
+    assert calls == [
+        ("GET", "https://example.com/api/health"),
+        ("POST", f"https://example.com/api/v1/{endpoint}"),
+    ]
+    assert result.shape == (1, 3, 5, 3)
+    assert mask.shape == (1, 3, 5)
+    assert mask_image.shape == (1, 3, 5, 3)
+    info = json.loads(info_text)
+    assert info["image_delivery"] == "url"
+    assert info["items"][0]["request_id"] == "url-test"
+    assert info["items"][0]["output_size"] == {"width": 5, "height": 3}
+
+
+@pytest.mark.parametrize("node_cls,endpoint,health_key", _DELIVERY_CASES)
+def test_legacy_positional_call_uses_base64_without_upload(monkeypatch, node_cls, endpoint, health_key):
+    node = node_cls()
+    calls = []
+    image = torch.linspace(0, 1, 3 * 5 * 3).reshape(3, 5, 3)
+    legacy_png = io.BytesIO()
+    node._image_tensor_to_rgb_pil(image).save(legacy_png, format="PNG")
+
+    def fail_upload(*args, **kwargs):
+        raise AssertionError("base64 模式不应上传图片")
+
+    def fake_request(method, url, timeout, **kwargs):
+        calls.append((method, url))
+        assert kwargs["headers"] == {"Content-Type": "application/json"}
+        payload = kwargs["json"]
+        assert payload["image"].startswith("data:image/png;base64,")
+        png_bytes = base64.b64decode(payload["image"].split(",", 1)[1])
+        assert png_bytes == legacy_png.getvalue()
+        with Image.open(io.BytesIO(png_bytes)) as png:
+            assert png.format == "PNG"
+            assert png.size == (5, 3)
+        return DummyResponse(data=_segment_response(size=(5, 3)))
+
+    monkeypatch.setattr(image_payload, "_upload_png_bytes_to_oss_url", fail_upload)
+    monkeypatch.setattr(rmbg_module, "FD_DWPOSE_API_KEY", "")
+    monkeypatch.setattr(rmbg_module.requests, "request", fake_request)
+    kwargs = _delivery_node_kwargs(node, image=image)
+    inputs = node.INPUT_TYPES()
+    positional = [kwargs[name] for name in inputs["required"]]
+    positional.extend(spec[1]["default"] for name, spec in inputs["optional"].items() if name != "image_delivery")
+    _, _, _, info_text = getattr(node, node.FUNCTION)(*positional)
+    assert calls == [("POST", f"https://example.com/api/v1/{endpoint}")]
+    assert json.loads(info_text)["image_delivery"] == "base64"
+    assert node._tensor_to_png_data_url(image) == "data:image/png;base64," + base64.b64encode(legacy_png.getvalue()).decode("ascii")
+
+
+@pytest.mark.parametrize("node_cls,endpoint,health_key", _DELIVERY_CASES)
+@pytest.mark.parametrize("status_code", [422, 413])
+def test_url_delivery_client_errors_do_not_retry(monkeypatch, node_cls, endpoint, health_key, status_code):
+    node = node_cls()
+    uploads = []
+    calls = []
+
+    def fake_upload(png_bytes):
+        uploads.append(png_bytes)
+        return "https://oss.example.com/input.png"
+
+    def fake_request(method, url, timeout, **kwargs):
+        calls.append((method, url))
+        assert kwargs["json"]["image"] == "https://oss.example.com/input.png"
+        return DummyResponse(status_code=status_code, data={"error": {"code": "INVALID_IMAGE", "message": "bad image"}})
+
+    monkeypatch.setattr(image_payload, "_upload_png_bytes_to_oss_url", fake_upload)
+    monkeypatch.setattr(rmbg_module.requests, "request", fake_request)
+    with pytest.raises(RuntimeError, match=f"{status_code}.*\nINVALID_IMAGE: bad image"):
+        getattr(node, node.FUNCTION)(**_delivery_node_kwargs(node, image_delivery="url"))
+    assert len(uploads) == 1
+    assert calls == [("POST", f"https://example.com/api/v1/{endpoint}")]
+
+
+@pytest.mark.parametrize("node_cls,endpoint,health_key", _DELIVERY_CASES)
+def test_url_delivery_node_switch_skips_upload_and_health(monkeypatch, node_cls, endpoint, health_key):
+    node = node_cls()
+
+    def fail_call(*args, **kwargs):
+        raise AssertionError("关闭节点时不应编码、上传或发出请求")
+
+    monkeypatch.setattr(rmbg_module, "tensor_to_image_payload", fail_call)
+    monkeypatch.setattr(image_payload, "_upload_png_bytes_to_oss_url", fail_call)
+    monkeypatch.setattr(rmbg_module.requests, "request", fail_call)
+    _, mask, mask_image, info_text = getattr(node, node.FUNCTION)(
+        **_delivery_node_kwargs(node, image_delivery="url", health_check=True, node_switch=1)
+    )
+    assert torch.count_nonzero(mask) == 0
+    assert torch.count_nonzero(mask_image) == 0
+    assert json.loads(info_text) == {"skipped": True, "reason": "node_switch", "image_delivery": "url"}

@@ -1,4 +1,4 @@
-"""知衣 SAM2 bbox 抠图节点 V2：env 下拉切换灰度/开发/自定义环境，并补齐 node_switch 开关。"""
+"""知衣 SAM2 bbox 抠图节点 V2：env 下拉切换灰度/开发/海外/自定义环境，并补齐 node_switch 开关。"""
 
 import json
 
@@ -6,11 +6,12 @@ import torch
 
 from ..config import FD_SAM2_SEGMENT_URL, SAM2_SERVICE_ENVS
 from ..sam2_segment_node import ZhiYiSAM2SegmentNode
+from ..utils.image_payload import IMAGE_DELIVERY_BASE64, IMAGE_DELIVERY_OPTIONS, image_delivery_input_config
 from .env import resolve_service_env, service_env_options
 
 
 class ZhiYiSAM2SegmentNodeV2(ZhiYiSAM2SegmentNode):
-    """知衣 SAM2 bbox 抠图节点 V2 - 支持灰度/开发环境一键切换。"""
+    """知衣 SAM2 bbox 抠图节点 V2 - 支持灰度/开发/海外环境一键切换。"""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -20,7 +21,7 @@ class ZhiYiSAM2SegmentNodeV2(ZhiYiSAM2SegmentNode):
                 "bboxes": ("BBOXES",),
                 "env": (service_env_options(), {
                     "default": "灰度环境",
-                    "tooltip": "灰度/开发环境使用内置地址（忽略 service_url 与 FD_* 环境变量）；自定义使用 service_url",
+                    "tooltip": "灰度/开发/海外环境使用内置地址（忽略 service_url 与 FD_* 环境变量）；自定义使用 service_url",
                 }),
                 "service_url": ("STRING", {
                     "default": FD_SAM2_SEGMENT_URL or "",
@@ -58,6 +59,7 @@ class ZhiYiSAM2SegmentNodeV2(ZhiYiSAM2SegmentNode):
                 "invert_output": ("BOOLEAN", {"default": False}),
                 "health_check": ("BOOLEAN", {"default": False}),
                 "node_switch": ("INT", {"default": 0, "min": 0, "max": 1, "step": 1}),
+                "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
             },
         }
 
@@ -92,6 +94,7 @@ class ZhiYiSAM2SegmentNodeV2(ZhiYiSAM2SegmentNode):
         invert_output=False,
         health_check=False,
         node_switch=0,
+        image_delivery=IMAGE_DELIVERY_BASE64,
     ):
         if node_switch == 1:
             image_batch = self._expand_images(images)
@@ -146,6 +149,7 @@ class ZhiYiSAM2SegmentNodeV2(ZhiYiSAM2SegmentNode):
                         background_color,
                         invert_output,
                         timeout,
+                        image_delivery,
                     ),
                 )
             else:
@@ -156,6 +160,7 @@ class ZhiYiSAM2SegmentNodeV2(ZhiYiSAM2SegmentNode):
         results = self._run_concurrent(tasks, max_concurrency)
         info = {
             "service_url": service_url,
+            "image_delivery": image_delivery,
             "background": background,
             "dilate": int(dilate),
             "blur": int(blur),

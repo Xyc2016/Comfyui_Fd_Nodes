@@ -1,4 +1,4 @@
-"""知衣 RMBG/衣物/时尚/身体 外部 API 节点 V2：env 下拉切换灰度/开发/自定义环境。"""
+"""知衣 RMBG/衣物/时尚/身体 外部 API 节点 V2：env 下拉切换灰度/开发/海外/自定义环境。"""
 
 from ..config import (
     CUSTOM_SERVICE_URL_PRESET,
@@ -7,6 +7,11 @@ from ..config import (
     FD_FASHION_SEGMENT_URL,
     FD_RMBG_URL,
     RMBG_SERVICE_ENVS,
+)
+from ..utils.image_payload import (
+    IMAGE_DELIVERY_BASE64,
+    IMAGE_DELIVERY_OPTIONS,
+    image_delivery_input_config,
 )
 from ..zhiyi_rmbg_segment_node import (
     BACKGROUND_MODES,
@@ -19,7 +24,7 @@ from .env import resolve_service_env, service_env_options
 
 
 class ZhiYiRMBGNodeV2(_RmbgSegmentApiBase):
-    """知衣 RMBG 2.0 背景去除节点 V2 - 支持灰度/开发环境一键切换。"""
+    """知衣 RMBG 2.0 背景去除节点 V2 - 支持灰度/开发/海外环境一键切换。"""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -28,7 +33,7 @@ class ZhiYiRMBGNodeV2(_RmbgSegmentApiBase):
                 "image": ("IMAGE",),
                 "env": (service_env_options(), {
                     "default": "开发环境",
-                    "tooltip": "灰度/开发环境使用内置地址（忽略 service_url 与 FD_* 环境变量）；自定义使用 service_url",
+                    "tooltip": "灰度/开发/海外环境使用内置地址（忽略 service_url 与 FD_* 环境变量）；自定义使用 service_url",
                 }),
                 "service_url": ("STRING", {
                     "default": FD_RMBG_URL or "http://10.1.0.230:8003/v1/rmbg",
@@ -52,6 +57,7 @@ class ZhiYiRMBGNodeV2(_RmbgSegmentApiBase):
             "optional": {
                 "health_check": ("BOOLEAN", {"default": False}),
                 "node_switch": ("INT", {"default": 0, "min": 0, "max": 1, "step": 1}),
+                "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
             },
         }
 
@@ -81,6 +87,7 @@ class ZhiYiRMBGNodeV2(_RmbgSegmentApiBase):
         timeout,
         health_check=False,
         node_switch=0,
+        image_delivery=IMAGE_DELIVERY_BASE64,
     ):
         resolved_base = resolve_service_env(env, RMBG_SERVICE_ENVS)
         return self._execute(
@@ -104,6 +111,7 @@ class ZhiYiRMBGNodeV2(_RmbgSegmentApiBase):
             health_check=health_check,
             node_switch=node_switch,
             service_url_preset=CUSTOM_SERVICE_URL_PRESET,
+            image_delivery=image_delivery,
             extra={"sensitivity": float(sensitivity), "refine_foreground": bool(refine_foreground)},
             info_extra={"sensitivity": float(sensitivity), "refine_foreground": bool(refine_foreground)},
         )
@@ -119,7 +127,7 @@ class ZhiYiClothesSegmentNodeV2(_RmbgSegmentApiBase):
                 "image": ("IMAGE",),
                 "env": (service_env_options(), {
                     "default": "开发环境",
-                    "tooltip": "灰度/开发环境使用内置地址（忽略 service_url 与 FD_* 环境变量）；自定义使用 service_url",
+                    "tooltip": "灰度/开发/海外环境使用内置地址（忽略 service_url 与 FD_* 环境变量）；自定义使用 service_url",
                 }),
                 "service_url": ("STRING", {
                     "default": FD_CLOTHES_SEGMENT_URL or "http://10.1.0.230:8003/v1/segment/clothes",
@@ -147,6 +155,7 @@ class ZhiYiClothesSegmentNodeV2(_RmbgSegmentApiBase):
             "optional": {
                 "health_check": ("BOOLEAN", {"default": False}),
                 "node_switch": ("INT", {"default": 0, "min": 0, "max": 1, "step": 1}),
+                "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
             },
         }
 
@@ -175,6 +184,7 @@ class ZhiYiClothesSegmentNodeV2(_RmbgSegmentApiBase):
         timeout,
         health_check=False,
         node_switch=0,
+        image_delivery=IMAGE_DELIVERY_BASE64,
     ):
         selected_classes = self._parse_classes_text(classes, CLOTHES_CLASSES, allow_comma_split=True)
         resolved_base = resolve_service_env(env, RMBG_SERVICE_ENVS)
@@ -199,6 +209,7 @@ class ZhiYiClothesSegmentNodeV2(_RmbgSegmentApiBase):
             health_check=health_check,
             node_switch=node_switch,
             service_url_preset=CUSTOM_SERVICE_URL_PRESET,
+            image_delivery=image_delivery,
             extra={"classes": selected_classes},
             info_extra={"classes": selected_classes},
         )
@@ -214,7 +225,7 @@ class ZhiYiFashionSegmentNodeV2(_RmbgSegmentApiBase):
                 "image": ("IMAGE",),
                 "env": (service_env_options(), {
                     "default": "开发环境",
-                    "tooltip": "灰度/开发环境使用内置地址（忽略 service_url 与 FD_* 环境变量）；自定义使用 service_url",
+                    "tooltip": "灰度/开发/海外环境使用内置地址（忽略 service_url 与 FD_* 环境变量）；自定义使用 service_url",
                 }),
                 "service_url": ("STRING", {
                     "default": FD_FASHION_SEGMENT_URL or "http://10.1.0.230:8003/v1/segment/fashion",
@@ -242,6 +253,7 @@ class ZhiYiFashionSegmentNodeV2(_RmbgSegmentApiBase):
             "optional": {
                 "health_check": ("BOOLEAN", {"default": False}),
                 "node_switch": ("INT", {"default": 0, "min": 0, "max": 1, "step": 1}),
+                "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
             },
         }
 
@@ -270,6 +282,7 @@ class ZhiYiFashionSegmentNodeV2(_RmbgSegmentApiBase):
         timeout,
         health_check=False,
         node_switch=0,
+        image_delivery=IMAGE_DELIVERY_BASE64,
     ):
         selected_classes = self._parse_classes_text(classes, FASHION_CLASSES, allow_comma_split=False)
         resolved_base = resolve_service_env(env, RMBG_SERVICE_ENVS)
@@ -294,6 +307,7 @@ class ZhiYiFashionSegmentNodeV2(_RmbgSegmentApiBase):
             health_check=health_check,
             node_switch=node_switch,
             service_url_preset=CUSTOM_SERVICE_URL_PRESET,
+            image_delivery=image_delivery,
             extra={"classes": selected_classes},
             info_extra={"classes": selected_classes},
         )
@@ -309,7 +323,7 @@ class ZhiYiBodySegmentNodeV2(_RmbgSegmentApiBase):
                 "image": ("IMAGE",),
                 "env": (service_env_options(), {
                     "default": "开发环境",
-                    "tooltip": "灰度/开发环境使用内置地址（忽略 service_url 与 FD_* 环境变量）；自定义使用 service_url",
+                    "tooltip": "灰度/开发/海外环境使用内置地址（忽略 service_url 与 FD_* 环境变量）；自定义使用 service_url",
                 }),
                 "service_url": ("STRING", {
                     "default": FD_BODY_SEGMENT_URL or "http://10.1.0.230:8003/v1/segment/body",
@@ -343,6 +357,7 @@ class ZhiYiBodySegmentNodeV2(_RmbgSegmentApiBase):
             "optional": {
                 "health_check": ("BOOLEAN", {"default": False}),
                 "node_switch": ("INT", {"default": 0, "min": 0, "max": 1, "step": 1}),
+                "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
             },
         }
 
@@ -371,6 +386,7 @@ class ZhiYiBodySegmentNodeV2(_RmbgSegmentApiBase):
         timeout,
         health_check=False,
         node_switch=0,
+        image_delivery=IMAGE_DELIVERY_BASE64,
     ):
         selected_classes = self._parse_classes_text(classes, BODY_CLASSES, allow_comma_split=True)
         resolved_base = resolve_service_env(env, RMBG_SERVICE_ENVS)
@@ -395,6 +411,7 @@ class ZhiYiBodySegmentNodeV2(_RmbgSegmentApiBase):
             health_check=health_check,
             node_switch=node_switch,
             service_url_preset=CUSTOM_SERVICE_URL_PRESET,
+            image_delivery=image_delivery,
             extra={"classes": selected_classes},
             info_extra={"classes": selected_classes, "process_res_ignored": True},
         )

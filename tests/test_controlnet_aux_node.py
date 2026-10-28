@@ -8,6 +8,13 @@ import torch
 from PIL import Image
 
 from src.Comfyui_Fd_Nodes import zhiyi_controlnet_aux_node as aux_module
+from src.Comfyui_Fd_Nodes import zhiyi_dwpose_detect_node as dwpose_module
+from src.Comfyui_Fd_Nodes.utils import image_payload as image_payload_module
+from src.Comfyui_Fd_Nodes.v2.controlnet_aux_v2_node import (
+    ZhiYiDepthAnythingV2PreprocessorNodeV2,
+    ZhiYiDWPoseDetectNodeV2,
+    ZhiYiLineArtPreprocessorNodeV2,
+)
 from src.Comfyui_Fd_Nodes.config import CUSTOM_SERVICE_URL_PRESET, _derive_dwpose_preprocess_url
 from src.Comfyui_Fd_Nodes.nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 from src.Comfyui_Fd_Nodes.zhiyi_controlnet_aux_node import (
@@ -66,9 +73,14 @@ def test_lineart_node_metadata():
     assert input_types["required"]["service_url"][1]["default"].endswith("/v1/lineart")
     assert input_types["required"]["coarse"][1]["default"] is False
     assert "health_check" in input_types["optional"]
-    assert list(input_types["optional"])[-1] == "service_url_preset"
+    assert list(input_types["optional"]) == [
+        "health_check", "node_switch", "service_url_preset", "image_delivery",
+    ]
+    delivery_options, delivery_config = input_types["optional"]["image_delivery"]
+    assert delivery_options == ["base64", "url"]
+    assert delivery_config["default"] == "base64"
     preset_options, preset_config = input_types["optional"]["service_url_preset"]
-    assert preset_options == [CUSTOM_SERVICE_URL_PRESET, "K8s 灰度", "10.1.0.230"]
+    assert preset_options == [CUSTOM_SERVICE_URL_PRESET, "K8s 灰度", "海外接入", "10.1.0.230"]
     assert preset_config["default"] == CUSTOM_SERVICE_URL_PRESET
     assert ZhiYiLineArtPreprocessorNode.RETURN_TYPES == ("IMAGE", "JSON")
     assert ZhiYiLineArtPreprocessorNode.RETURN_NAMES == ("LINEART_IMAGE", "INFO")
@@ -84,9 +96,14 @@ def test_depth_node_metadata():
     assert input_types["required"]["service_url"][1]["default"].endswith("/v1/depth-anything-v2")
     assert input_types["required"]["max_depth"][1]["default"] == 1.0
     assert "health_check" in input_types["optional"]
-    assert list(input_types["optional"])[-1] == "service_url_preset"
+    assert list(input_types["optional"]) == [
+        "health_check", "node_switch", "service_url_preset", "image_delivery",
+    ]
+    delivery_options, delivery_config = input_types["optional"]["image_delivery"]
+    assert delivery_options == ["base64", "url"]
+    assert delivery_config["default"] == "base64"
     preset_options, preset_config = input_types["optional"]["service_url_preset"]
-    assert preset_options == [CUSTOM_SERVICE_URL_PRESET, "K8s 灰度", "10.1.0.230"]
+    assert preset_options == [CUSTOM_SERVICE_URL_PRESET, "K8s 灰度", "海外接入", "10.1.0.230"]
     assert preset_config["default"] == CUSTOM_SERVICE_URL_PRESET
     assert ZhiYiDepthAnythingV2PreprocessorNode.RETURN_TYPES == ("IMAGE", "JSON")
     assert ZhiYiDepthAnythingV2PreprocessorNode.RETURN_NAMES == ("DEPTH_IMAGE", "INFO")
@@ -124,6 +141,7 @@ def test_controlnet_aux_defaults_are_derived_from_dwpose_service_root(monkeypatc
 
 
 def test_lineart_posts_payload_and_decodes_outputs(monkeypatch):
+    monkeypatch.setattr(aux_module, "FD_DWPOSE_API_KEY", "")
     node = ZhiYiLineArtPreprocessorNode()
     images = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
     calls = []
@@ -438,6 +456,145 @@ def test_post_preprocess_requires_processed_image(monkeypatch):
 
     with pytest.raises(RuntimeError, match="缺少 processed_image"):
         node._post_preprocess("https://example.com/v1/lineart", {"image": "x"}, timeout=30)
+
+
+DELIVERY_NODE_CASES = [
+    pytest.param(ZhiYiLineArtPreprocessorNode, "lineart", {"coarse": True}, id="lineart-v1"),
+    pytest.param(ZhiYiDepthAnythingV2PreprocessorNode, "depth-anything-v2", {"max_depth": 2.5}, id="depth-v1"),
+    pytest.param(
+        ZhiYiLineArtPreprocessorNodeV2, "lineart",
+        {"env": "custom", "coarse": True, "return_image": True}, id="lineart-v2",
+    ),
+    pytest.param(
+        ZhiYiDepthAnythingV2PreprocessorNodeV2, "depth-anything-v2",
+        {"env": "custom", "max_depth": 2.5}, id="depth-v2",
+    ),
+    pytest.param(
+        ZhiYiDWPoseDetectNodeV2, "pose",
+        {
+            "env": "custom", "detect_body": True, "detect_hand": True,
+            "detect_face": False, "xinsr_stick_scaling": False,
+            "return_pose_image": True, "return_openpose_json": True,
+        }, id="dwpose-v2",
+    ),
+]
+
+
+@pytest.mark.parametrize("node_class,endpoint,extra", DELIVERY_NODE_CASES)
+@pytest.mark.parametrize("delivery", ["default", "url"])
+def test_image_delivery_upload_payload_and_authenticated_health(monkeypatch, node_class, endpoint, extra, delivery):
+    node = node_class()
+    images = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
+    calls = []
+    uploads = []
+    request_module = dwpose_module if endpoint == "pose" else aux_module
+    monkeypatch.setattr(request_module, "FD_DWPOSE_API_KEY", " test-api-key ")
+    monkeypatch.setattr(image_payload_module, "FD_OSS_URL_PATH_PREFIX_GPU_INPUT", "test-input/")
+
+    def fake_upload(path, png_bytes):
+        assert delivery == "url", "默认 base64 模式不应上传图片"
+        assert path.startswith("test-input/") and path.endswith(".png")
+        with Image.open(io.BytesIO(png_bytes)) as uploaded_image:
+            assert uploaded_image.format == "PNG"
+            assert uploaded_image.size == (2, 2)
+            assert uploaded_image.convert("RGB").getpixel((0, 0)) == (0, 0, 0)
+        uploads.append(path)
+        return "https://bucket.oss-cn-hangzhou.aliyuncs.com/input.png"
+
+    def fake_request(method, url, timeout, **kwargs):
+        calls.append((method, url))
+        assert timeout == 30
+        assert kwargs["headers"]["Authorization"] == "Bearer test-api-key"
+        if method == "GET":
+            assert uploads == []
+            assert url == "https://example.com/api/health"
+            return DummyResponse(data={
+                "status": "ok", "loaded": True,
+                "lineart": {"loaded": True}, "depth_anything_v2": {"loaded": True},
+            })
+        assert method == "POST"
+        assert url == f"https://example.com/api/v1/{endpoint}"
+        assert kwargs["headers"]["Content-Type"] == "application/json"
+        payload = kwargs["json"]
+        if delivery == "url":
+            assert len(uploads) == 1
+            assert payload["image"] == "https://bucket.oss-cn-hangzhou-internal.aliyuncs.com/input.png"
+        else:
+            assert uploads == []
+            assert payload["image"] == _image_data_url(color=(0, 0, 0))
+        assert payload["resolution"] == 512
+        assert payload["upscale_method"] == "INTER_CUBIC"
+        assert payload["image_format"] == "png_base64"
+        if endpoint == "pose":
+            assert payload["return_pose_image"] is True
+            return DummyResponse(data={
+                "pose_image": _image_data_url(color=(0, 255, 0)),
+                "openpose_json": {"people": []},
+            })
+        assert payload["return_image"] is True
+        if endpoint == "lineart":
+            assert payload["coarse"] is True
+        else:
+            assert payload["max_depth"] == 2.5
+        return DummyResponse(data=_preprocess_response())
+
+    monkeypatch.setattr(image_payload_module, "upload_bytes_to_oss", fake_upload)
+    monkeypatch.setattr(request_module.requests, "request", fake_request)
+    options = dict(extra)
+    if delivery == "url":
+        options["image_delivery"] = "url"
+    result = getattr(node, node.FUNCTION)(
+        image=images, service_url=f"https://example.com/api/v1/{endpoint}", resolution=512,
+        upscale_method="INTER_CUBIC", max_concurrency=1, timeout=30,
+        health_check=True, **options,
+    )
+
+    assert calls == [
+        ("GET", "https://example.com/api/health"),
+        ("POST", f"https://example.com/api/v1/{endpoint}"),
+    ]
+    assert result[0].shape == images.shape
+    assert torch.equal(result[0][0, 0, 0], torch.tensor([0.0, 1.0, 0.0]))
+    assert json.loads(result[-1])["image_delivery"] == ("base64" if delivery == "default" else "url")
+
+
+@pytest.mark.parametrize("node_class,endpoint,extra", DELIVERY_NODE_CASES)
+def test_url_delivery_node_switch_skips_upload_and_health(monkeypatch, node_class, endpoint, extra):
+    node = node_class()
+    image = torch.ones((2, 2, 3), dtype=torch.float32)
+
+    def unexpected_call(*args, **kwargs):
+        raise AssertionError("node_switch=1 不应上传、检查健康状态或请求推理")
+
+    monkeypatch.setattr(image_payload_module, "upload_bytes_to_oss", unexpected_call)
+    monkeypatch.setattr(aux_module.requests, "request", unexpected_call)
+    result = getattr(node, node.FUNCTION)(
+        image=image, service_url="https://example.com/api/v1", resolution=512,
+        upscale_method="INTER_CUBIC", max_concurrency=1, timeout=30,
+        health_check=True, node_switch=1, image_delivery="url", **extra,
+    )
+
+    assert torch.equal(result[0], image.unsqueeze(0))
+    assert json.loads(result[-1]) == {"skipped": True, "reason": "node_switch"}
+
+
+@pytest.mark.parametrize("node_class", [
+    ZhiYiDWPoseDetectNodeV2,
+    ZhiYiLineArtPreprocessorNodeV2,
+    ZhiYiDepthAnythingV2PreprocessorNodeV2,
+])
+def test_v2_delivery_widget_is_appended_with_base64_default(node_class):
+    optional = node_class.INPUT_TYPES()["optional"]
+    assert list(optional) == ["health_check", "node_switch", "image_delivery"]
+    options, config = optional["image_delivery"]
+    assert options == ["base64", "url"]
+    assert config["default"] == "base64"
+
+
+def test_tensor_to_png_data_url_remains_compatible():
+    node = ZhiYiLineArtPreprocessorNode()
+    image = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
+    assert node._tensor_to_png_data_url(image) == _image_data_url(color=(0, 0, 0))
 
 
 def test_timeout_is_normalized(monkeypatch):

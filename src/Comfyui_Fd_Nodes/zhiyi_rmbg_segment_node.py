@@ -16,11 +16,19 @@ from .config import (
     CUSTOM_SERVICE_URL_PRESET,
     FD_BODY_SEGMENT_URL,
     FD_CLOTHES_SEGMENT_URL,
+    FD_DWPOSE_API_KEY,
     FD_FASHION_SEGMENT_URL,
     FD_RMBG_URL,
     RMBG_SERVICE_URL_PRESETS,
 )
 from .utils.error_utils import ERROR_TIMEOUT, normalize_error_message
+from .utils.image_payload import (
+    IMAGE_DELIVERY_BASE64,
+    IMAGE_DELIVERY_OPTIONS,
+    auth_headers,
+    image_delivery_input_config,
+    tensor_to_image_payload,
+)
 from .utils.logging_utils import configure_default_logging
 from .utils.service_url import resolve_service_url_preset, service_url_preset_options
 
@@ -195,11 +203,7 @@ class _RmbgSegmentApiBase:
         return Image.fromarray(arr[..., :3]).convert("RGB")
 
     def _tensor_to_png_data_url(self, image_tensor):
-        image = self._image_tensor_to_rgb_pil(image_tensor)
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
-        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-        return f"data:image/png;base64,{encoded}"
+        return tensor_to_image_payload(image_tensor, IMAGE_DELIVERY_BASE64)
 
     def _decode_png_data_url(self, value, field_name):
         if not isinstance(value, str) or not value:
@@ -333,7 +337,7 @@ class _RmbgSegmentApiBase:
         response = self._request_with_retry(
             "POST",
             service_url,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", **auth_headers(FD_DWPOSE_API_KEY)},
             json=payload,
             timeout=timeout,
             retry_count=1,
@@ -352,7 +356,9 @@ class _RmbgSegmentApiBase:
 
     def _check_health(self, service_url, timeout, health_key, label):
         health_url = _health_url(service_url)
-        response = self._request_with_retry("GET", health_url, timeout=timeout, retry_count=0)
+        response = self._request_with_retry(
+            "GET", health_url, timeout=timeout, retry_count=0, headers=auth_headers(FD_DWPOSE_API_KEY)
+        )
         if response.status_code >= 400:
             raise RuntimeError(f"{label} health check 失败: {response.status_code}\n{response.text[:500]}")
         try:
@@ -457,10 +463,12 @@ class _RmbgSegmentApiBase:
             raise RuntimeError(f"{label} 失败:\n" + "\n".join(errors))
         return results
 
-    def _single_request(self, idx, image_tensor, service_url, payload_params, timeout):
+    def _single_request(
+        self, idx, image_tensor, service_url, payload_params, timeout, image_delivery=IMAGE_DELIVERY_BASE64
+    ):
         original_image = self._image_tensor_to_rgb_pil(image_tensor)
         payload = self._build_common_payload(
-            self._tensor_to_png_data_url(image_tensor),
+            tensor_to_image_payload(image_tensor, image_delivery),
             payload_params["process_res"],
             payload_params["mask_blur"],
             payload_params["mask_offset"],
@@ -552,6 +560,7 @@ class _RmbgSegmentApiBase:
         service_url_preset,
         extra,
         info_extra,
+        image_delivery=IMAGE_DELIVERY_BASE64,
     ):
         if node_switch == 1:
             image_batch = self._normalize_image_batch(image)
@@ -560,7 +569,7 @@ class _RmbgSegmentApiBase:
                 self._compose_output_image(image_batch, mask, background, background_color),
                 mask,
                 self._mask_to_image_tensor(mask),
-                json.dumps({"skipped": True, "reason": "node_switch"}, ensure_ascii=False),
+                json.dumps({"skipped": True, "reason": "node_switch", "image_delivery": image_delivery}, ensure_ascii=False),
             )
 
         selected_service_url = resolve_service_url_preset(
@@ -590,13 +599,17 @@ class _RmbgSegmentApiBase:
         }
         tasks = []
         for idx, image_tensor in enumerate(image_tensors):
-            tasks.append((idx, self._single_request, (idx, image_tensor, final_service_url, payload_params, timeout)))
+            tasks.append((
+                idx, self._single_request,
+                (idx, image_tensor, final_service_url, payload_params, timeout, image_delivery),
+            ))
 
         print(f"[{label}] 处理 {len(tasks)} 张图片，并发上限 {max_concurrency}")
         results = self._run_concurrent(tasks, max_concurrency, label)
         info = {
             "service_url": final_service_url,
             "endpoint": f"/v1/{endpoint}",
+            "image_delivery": image_delivery,
             "process_res": int(process_res),
             "mask_blur": int(mask_blur),
             "mask_offset": int(mask_offset),
@@ -651,6 +664,7 @@ class ZhiYiRMBGNode(_RmbgSegmentApiBase):
                     "default": CUSTOM_SERVICE_URL_PRESET,
                     "tooltip": "选择部署预设时忽略 service_url；选择自定义时使用 service_url 文本框",
                 }),
+                "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
             },
         }
 
@@ -680,6 +694,7 @@ class ZhiYiRMBGNode(_RmbgSegmentApiBase):
         health_check=False,
         node_switch=0,
         service_url_preset=None,
+        image_delivery=IMAGE_DELIVERY_BASE64,
     ):
         return self._execute(
             image=image,
@@ -702,6 +717,7 @@ class ZhiYiRMBGNode(_RmbgSegmentApiBase):
             health_check=health_check,
             node_switch=node_switch,
             service_url_preset=service_url_preset,
+            image_delivery=image_delivery,
             extra={"sensitivity": float(sensitivity), "refine_foreground": bool(refine_foreground)},
             info_extra={"sensitivity": float(sensitivity), "refine_foreground": bool(refine_foreground)},
         )
@@ -744,6 +760,7 @@ class ZhiYiClothesSegmentNode(_RmbgSegmentApiBase):
                     "default": CUSTOM_SERVICE_URL_PRESET,
                     "tooltip": "选择部署预设时忽略 service_url；选择自定义时使用 service_url 文本框",
                 }),
+                "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
             },
         }
 
@@ -772,6 +789,7 @@ class ZhiYiClothesSegmentNode(_RmbgSegmentApiBase):
         health_check=False,
         node_switch=0,
         service_url_preset=None,
+        image_delivery=IMAGE_DELIVERY_BASE64,
     ):
         selected_classes = self._parse_classes_text(classes, CLOTHES_CLASSES, allow_comma_split=True)
         return self._execute(
@@ -795,6 +813,7 @@ class ZhiYiClothesSegmentNode(_RmbgSegmentApiBase):
             health_check=health_check,
             node_switch=node_switch,
             service_url_preset=service_url_preset,
+            image_delivery=image_delivery,
             extra={"classes": selected_classes},
             info_extra={"classes": selected_classes},
         )
@@ -837,6 +856,7 @@ class ZhiYiFashionSegmentNode(_RmbgSegmentApiBase):
                     "default": CUSTOM_SERVICE_URL_PRESET,
                     "tooltip": "选择部署预设时忽略 service_url；选择自定义时使用 service_url 文本框",
                 }),
+                "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
             },
         }
 
@@ -865,6 +885,7 @@ class ZhiYiFashionSegmentNode(_RmbgSegmentApiBase):
         health_check=False,
         node_switch=0,
         service_url_preset=None,
+        image_delivery=IMAGE_DELIVERY_BASE64,
     ):
         selected_classes = self._parse_classes_text(classes, FASHION_CLASSES, allow_comma_split=False)
         return self._execute(
@@ -888,6 +909,7 @@ class ZhiYiFashionSegmentNode(_RmbgSegmentApiBase):
             health_check=health_check,
             node_switch=node_switch,
             service_url_preset=service_url_preset,
+            image_delivery=image_delivery,
             extra={"classes": selected_classes},
             info_extra={"classes": selected_classes},
         )
@@ -936,6 +958,7 @@ class ZhiYiBodySegmentNode(_RmbgSegmentApiBase):
                     "default": CUSTOM_SERVICE_URL_PRESET,
                     "tooltip": "选择部署预设时忽略 service_url；选择自定义时使用 service_url 文本框",
                 }),
+                "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
             },
         }
 
@@ -964,6 +987,7 @@ class ZhiYiBodySegmentNode(_RmbgSegmentApiBase):
         health_check=False,
         node_switch=0,
         service_url_preset=None,
+        image_delivery=IMAGE_DELIVERY_BASE64,
     ):
         selected_classes = self._parse_classes_text(classes, BODY_CLASSES, allow_comma_split=True)
         return self._execute(
@@ -987,6 +1011,7 @@ class ZhiYiBodySegmentNode(_RmbgSegmentApiBase):
             health_check=health_check,
             node_switch=node_switch,
             service_url_preset=service_url_preset,
+            image_delivery=image_delivery,
             extra={"classes": selected_classes},
             info_extra={"classes": selected_classes, "process_res_ignored": True},
         )

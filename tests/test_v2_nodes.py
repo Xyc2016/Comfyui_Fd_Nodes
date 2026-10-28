@@ -228,7 +228,7 @@ def test_input_types_business_params_match_old():
 
 
 def test_env_options_shape():
-    assert ENV_OPTIONS == ["灰度环境", "开发环境", CUSTOM_SERVICE_URL_PRESET]
+    assert ENV_OPTIONS == ["灰度环境", "开发环境", "海外环境", CUSTOM_SERVICE_URL_PRESET]
     assert all(isinstance(option, str) for option in ENV_OPTIONS)
     assert CUSTOM_ENV == "custom"
 
@@ -299,6 +299,8 @@ def test_switch_defaults_true():
 def test_resolve_service_env():
     assert resolve_service_env("灰度环境", DWPOSE_SERVICE_ENVS) == DWPOSE_SERVICE_ENVS["gray"]
     assert resolve_service_env("开发环境", RMBG_SERVICE_ENVS) == RMBG_SERVICE_ENVS["dev"]
+    assert resolve_service_env("海外环境", DWPOSE_SERVICE_ENVS) == DWPOSE_SERVICE_ENVS["overseas"]
+    assert resolve_service_env("overseas", SAM2_SERVICE_ENVS) == SAM2_SERVICE_ENVS["overseas"]
     assert resolve_service_env("gray", SAM2_SERVICE_ENVS) == SAM2_SERVICE_ENVS["gray"]
     assert resolve_service_env("dev", SAM2_SERVICE_ENVS) == SAM2_SERVICE_ENVS["dev"]
     assert resolve_service_env(None, DWPOSE_SERVICE_ENVS) is None
@@ -321,9 +323,11 @@ def test_resolve_service_env():
 def test_normalize_env_legacy_forms():
     assert normalize_env("灰度环境") == "gray"
     assert normalize_env("开发环境") == "dev"
+    assert normalize_env("海外环境") == "overseas"
     assert normalize_env(CUSTOM_SERVICE_URL_PRESET) == "custom"
     assert normalize_env("gray") == "gray"
     assert normalize_env("dev") == "dev"
+    assert normalize_env("overseas") == "overseas"
     assert normalize_env("custom") == "custom"
     assert normalize_env(None) is None
     assert normalize_env("") is None
@@ -331,6 +335,13 @@ def test_normalize_env_legacy_forms():
         normalize_env("不存在")
     with pytest.raises(RuntimeError):
         normalize_env(123)
+
+
+def test_overseas_env_urls_cover_all_services():
+    gateway = "http://fd-oversease-access-hz.external.sometimes.cn/gpu/online-server-gray"
+    assert SAM2_SERVICE_ENVS["overseas"] == f"{gateway}/model-api-sam2-hiera-base-plus"
+    assert DWPOSE_SERVICE_ENVS["overseas"] == f"{gateway}/model-api-dwpose"
+    assert RMBG_SERVICE_ENVS["overseas"] == f"{gateway}/model-api-dwpose"
 
 
 # ---------- 7. 环境 URL 解析（mock 请求） ----------
@@ -442,6 +453,89 @@ def test_sam2_v2_dev_env_url(monkeypatch):
         timeout=30,
     )
     assert calls == ["http://10.1.0.230:8002/v1/segment"]
+
+
+def test_dwpose_v2_overseas_env_url(monkeypatch):
+    node = ZhiYiDWPoseDetectNodeV2()
+    calls = []
+
+    def fake_request(method, url, timeout, **kwargs):
+        calls.append(url)
+        return DummyResponse(data=_pose_response())
+
+    monkeypatch.setattr(dwpose_module.requests, "request", fake_request)
+
+    node.detect_pose(
+        image=torch.zeros((1, 2, 2, 3), dtype=torch.float32),
+        env="overseas",
+        service_url="https://custom.example.com/v1/pose",
+        resolution=512,
+        detect_body=True,
+        detect_hand=True,
+        detect_face=False,
+        xinsr_stick_scaling=False,
+        return_pose_image=True,
+        return_openpose_json=True,
+        upscale_method="INTER_CUBIC",
+        max_concurrency=1,
+        timeout=30,
+    )
+    assert calls == [
+        "http://fd-oversease-access-hz.external.sometimes.cn/gpu/online-server-gray/model-api-dwpose/v1/pose"
+    ]
+
+
+def test_sam2_v2_overseas_env_url(monkeypatch):
+    node = ZhiYiSAM2SegmentNodeV2()
+    calls = []
+
+    def fake_request(method, url, timeout, **kwargs):
+        calls.append(url)
+        return DummyResponse(data=_sam2_response())
+
+    monkeypatch.setattr(sam2_module.requests, "request", fake_request)
+
+    node.segment(
+        images=torch.zeros((1, 2, 2, 3), dtype=torch.float32),
+        bboxes=[[[0, 0, 2, 2]]],
+        env="overseas",
+        service_url="https://custom.example.com/v1/segment",
+        dilate=0,
+        blur=0,
+        background="Alpha",
+        background_color="#222222",
+        max_concurrency=1,
+        timeout=30,
+    )
+    assert calls == [
+        "http://fd-oversease-access-hz.external.sometimes.cn/gpu/online-server-gray/model-api-sam2-hiera-base-plus/v1/segment"
+    ]
+
+
+def test_lineart_v2_overseas_env_url(monkeypatch):
+    node = ZhiYiLineArtPreprocessorNodeV2()
+    calls = []
+
+    def fake_request(method, url, timeout, **kwargs):
+        calls.append(url)
+        return DummyResponse(data=_preprocess_response())
+
+    monkeypatch.setattr(aux_module.requests, "request", fake_request)
+
+    node.preprocess(
+        image=torch.zeros((1, 2, 2, 3), dtype=torch.float32),
+        env="海外环境",
+        service_url="https://custom.example.com/v1/lineart",
+        resolution=512,
+        coarse=False,
+        return_image=True,
+        upscale_method="INTER_CUBIC",
+        max_concurrency=1,
+        timeout=30,
+    )
+    assert calls == [
+        "http://fd-oversease-access-hz.external.sometimes.cn/gpu/online-server-gray/model-api-dwpose/v1/lineart"
+    ]
 
 
 # ---------- 8. mock 请求 payload ----------

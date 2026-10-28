@@ -9,6 +9,8 @@ from PIL import Image
 from src.Comfyui_Fd_Nodes import sam2_segment_node as sam2_module
 from src.Comfyui_Fd_Nodes.nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 from src.Comfyui_Fd_Nodes.sam2_segment_node import ZhiYiSAM2SegmentNode
+from src.Comfyui_Fd_Nodes.utils import image_payload as payload_module
+from src.Comfyui_Fd_Nodes.v2.sam2_segment_v2_node import ZhiYiSAM2SegmentNodeV2
 
 
 def _mask_data_url(size=(2, 2), white_pixels=None):
@@ -389,3 +391,64 @@ def test_post_segment_rejects_non_json_response(monkeypatch):
 
     with pytest.raises(RuntimeError, match="响应不是 JSON"):
         node._post_segment("https://example.com/v1/segment", {"image": "x"}, timeout=30)
+
+
+@pytest.mark.parametrize("node_class", [ZhiYiSAM2SegmentNode, ZhiYiSAM2SegmentNodeV2])
+def test_url_delivery_batch_preserves_bboxes_and_response(monkeypatch, node_class):
+    node = node_class()
+    uploads, posts = [], []
+    def upload(path, data):
+        uploads.append(data)
+        return f"https://bucket.oss-cn-hangzhou.aliyuncs.com/{len(uploads)}.png"
+    def request(method, url, timeout, **kwargs):
+        assert kwargs["headers"]["Authorization"] == "Bearer sam-key"
+        if method == "GET":
+            assert url == "https://example.com/gpu/sam/health"
+            return DummyResponse(data={"status": "ok", "loaded": True})
+        posts.append(kwargs["json"])
+        return DummyResponse(data={"mask": _mask_data_url(), "masks": []})
+    monkeypatch.setattr(payload_module, "upload_bytes_to_oss", upload)
+    monkeypatch.setattr(sam2_module, "FD_SAM2_API_KEY", "sam-key")
+    monkeypatch.setattr(sam2_module.requests, "request", request)
+    extra = {"env": "custom"} if node_class is ZhiYiSAM2SegmentNodeV2 else {}
+    result = node.segment(
+        images=torch.zeros((2, 2, 2, 3)), bboxes=[[[0, 0, 2, 2]]],
+        service_url="https://example.com/gpu/sam/v1/segment", dilate=6, blur=0,
+        background="Alpha", background_color="#222222", max_concurrency=1,
+        timeout=120, image_delivery="url", health_check=True, **extra,
+    )
+    assert len(uploads) == len(posts) == 2
+    for i, payload in enumerate(posts, 1):
+        assert payload["image"] == f"https://bucket.oss-cn-hangzhou-internal.aliyuncs.com/{i}.png"
+        assert payload["bboxes"] == [[0.0, 0.0, 2.0, 2.0]]
+        assert payload["mask_format"] == "png_base64"
+        assert payload["dilate"] == 6
+    assert result[1].shape == (2, 2, 2)
+    assert json.loads(result[3])["image_delivery"] == "url"
+
+
+@pytest.mark.parametrize("skip", ["empty_bbox", "node_switch"])
+def test_url_delivery_skip_never_uploads(monkeypatch, skip):
+    def unexpected(*args, **kwargs):
+        pytest.fail("跳过节点不应上传或调用服务")
+    monkeypatch.setattr(payload_module, "upload_bytes_to_oss", unexpected)
+    monkeypatch.setattr(sam2_module.requests, "request", unexpected)
+    result = ZhiYiSAM2SegmentNodeV2().segment(
+        images=torch.zeros((1, 2, 2, 3)), bboxes=[] if skip == "empty_bbox" else [[[0, 0, 2, 2]]],
+        env="custom", service_url="https://example.com/v1/segment", dilate=0, blur=0,
+        background="Alpha", background_color="#222222", max_concurrency=1, timeout=120,
+        image_delivery="url", health_check=True, node_switch=int(skip == "node_switch"),
+    )
+    assert result[0].shape == (1, 2, 2, 3)
+
+
+@pytest.mark.parametrize("status, code", [(422, "INVALID_IMAGE"), (413, "PAYLOAD_TOO_LARGE")])
+def test_terminal_errors_do_not_retry(monkeypatch, status, code):
+    calls = []
+    def request(*args, **kwargs):
+        calls.append(1)
+        return DummyResponse(status_code=status, data={"error": {"code": code, "message": "failed", "request_id": "req-url"}})
+    monkeypatch.setattr(sam2_module.requests, "request", request)
+    with pytest.raises(RuntimeError, match=f"{code}.*req-url"):
+        ZhiYiSAM2SegmentNode()._post_segment("https://example.com/v1/segment", {"image": "https://example.com/image.png"}, 120)
+    assert calls == [1]

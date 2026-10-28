@@ -13,8 +13,15 @@ import requests
 import torch
 from PIL import Image, ImageColor
 
-from .config import FD_SAM2_SEGMENT_URL
+from .config import FD_SAM2_API_KEY, FD_SAM2_SEGMENT_URL
 from .utils.error_utils import normalize_error_message
+from .utils.image_payload import (
+    IMAGE_DELIVERY_BASE64,
+    IMAGE_DELIVERY_OPTIONS,
+    auth_headers,
+    image_delivery_input_config,
+    tensor_to_image_payload,
+)
 from .utils.logging_utils import configure_default_logging
 
 configure_default_logging()
@@ -65,6 +72,7 @@ class ZhiYiSAM2SegmentNode:
             "optional": {
                 "invert_output": ("BOOLEAN", {"default": False}),
                 "health_check": ("BOOLEAN", {"default": False}),
+                "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
             },
         }
 
@@ -94,11 +102,7 @@ class ZhiYiSAM2SegmentNode:
         return Image.fromarray(arr[..., :3]).convert("RGB")
 
     def _tensor_to_png_data_url(self, image_tensor):
-        image = self._image_tensor_to_rgb_pil(image_tensor)
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
-        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-        return f"data:image/png;base64,{encoded}"
+        return tensor_to_image_payload(image_tensor, IMAGE_DELIVERY_BASE64)
 
     def _decode_png_data_url(self, value, field_name):
         if not isinstance(value, str) or not value:
@@ -199,9 +203,9 @@ class ZhiYiSAM2SegmentNode:
 
         return groups
 
-    def _build_payload(self, image_data_url, bboxes, dilate, blur):
+    def _build_payload(self, image, bboxes, dilate, blur):
         return {
-            "image": image_data_url,
+            "image": image,
             "bboxes": bboxes,
             "bbox_format": "xyxy",
             "return_individual_masks": True,
@@ -260,7 +264,7 @@ class ZhiYiSAM2SegmentNode:
         response = self._request_with_retry(
             "POST",
             service_url,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", **auth_headers(FD_SAM2_API_KEY)},
             json=payload,
             timeout=timeout,
             retry_count=1,
@@ -289,7 +293,9 @@ class ZhiYiSAM2SegmentNode:
 
     def _check_health(self, service_url, timeout):
         health_url = self._health_url(service_url)
-        response = self._request_with_retry("GET", health_url, timeout=timeout, retry_count=0)
+        response = self._request_with_retry(
+            "GET", health_url, timeout=timeout, retry_count=0, headers=auth_headers(FD_SAM2_API_KEY),
+        )
         if response.status_code >= 400:
             raise RuntimeError(f"SAM2 health check 失败: {response.status_code}\n{response.text[:500]}")
         try:
@@ -322,10 +328,14 @@ class ZhiYiSAM2SegmentNode:
             },
         }
 
-    def _single_request(self, idx, image_tensor, bboxes, service_url, dilate, blur, background, background_color, invert_output, timeout):
-        image_data_url = self._tensor_to_png_data_url(image_tensor)
-        payload = self._build_payload(image_data_url, bboxes, dilate, blur)
-        logger.info("Calling SAM2 API idx=%s bbox_count=%s service_url=%s", idx, len(bboxes), service_url)
+    def _single_request(
+        self, idx, image_tensor, bboxes, service_url, dilate, blur,
+        background, background_color, invert_output, timeout,
+        image_delivery=IMAGE_DELIVERY_BASE64,
+    ):
+        image_value = tensor_to_image_payload(image_tensor, image_delivery)
+        payload = self._build_payload(image_value, bboxes, dilate, blur)
+        logger.info("Calling SAM2 API idx=%s bbox_count=%s service_url=%s image_delivery=%s", idx, len(bboxes), service_url, image_delivery)
         result = self._post_segment(service_url, payload, timeout)
 
         image = self._image_tensor_to_rgb_pil(image_tensor)
@@ -387,6 +397,7 @@ class ZhiYiSAM2SegmentNode:
         timeout,
         invert_output=False,
         health_check=False,
+        image_delivery=IMAGE_DELIVERY_BASE64,
     ):
         service_url = (service_url or FD_SAM2_SEGMENT_URL or "").strip()
         if not service_url:
@@ -417,6 +428,7 @@ class ZhiYiSAM2SegmentNode:
                         background_color,
                         invert_output,
                         timeout,
+                        image_delivery,
                     ),
                 )
             else:
@@ -427,6 +439,7 @@ class ZhiYiSAM2SegmentNode:
         results = self._run_concurrent(tasks, max_concurrency)
         info = {
             "service_url": service_url,
+            "image_delivery": image_delivery,
             "background": background,
             "dilate": int(dilate),
             "blur": int(blur),

@@ -1,4 +1,4 @@
-"""知衣 DWPose/LineArt/Depth 外部 API 节点 V2：env 下拉切换灰度/开发/自定义环境。"""
+"""知衣 DWPose/LineArt/Depth 外部 API 节点 V2：env 下拉切换灰度/开发/海外/自定义环境。"""
 
 import json
 
@@ -10,6 +10,11 @@ from ..config import (
     FD_CONTROLNET_AUX_DEPTH_ANYTHING_V2_URL,
     FD_CONTROLNET_AUX_LINEART_URL,
     FD_DWPOSE_POSE_URL,
+)
+from ..utils.image_payload import (
+    IMAGE_DELIVERY_BASE64,
+    IMAGE_DELIVERY_OPTIONS,
+    image_delivery_input_config,
 )
 from ..zhiyi_controlnet_aux_node import (
     UPSCALE_METHODS,
@@ -24,7 +29,7 @@ from .env import resolve_service_env, service_env_options
 
 
 class ZhiYiDWPoseDetectNodeV2(ZhiYiDWPoseDetectNode):
-    """知衣 DWPose 姿态检测节点 V2 - 支持灰度/开发环境一键切换与返回开关。"""
+    """知衣 DWPose 姿态检测节点 V2 - 支持灰度/开发/海外环境一键切换与返回开关。"""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -33,7 +38,7 @@ class ZhiYiDWPoseDetectNodeV2(ZhiYiDWPoseDetectNode):
                 "image": ("IMAGE",),
                 "env": (service_env_options(), {
                     "default": "灰度环境",
-                    "tooltip": "灰度/开发环境使用内置地址（忽略 service_url 与 FD_* 环境变量）；自定义使用 service_url",
+                    "tooltip": "灰度/开发/海外环境使用内置地址（忽略 service_url 与 FD_* 环境变量）；自定义使用 service_url",
                 }),
                 "service_url": ("STRING", {
                     "default": FD_DWPOSE_POSE_URL or DEFAULT_DWPOSE_POSE_URL,
@@ -69,6 +74,7 @@ class ZhiYiDWPoseDetectNodeV2(ZhiYiDWPoseDetectNode):
             "optional": {
                 "health_check": ("BOOLEAN", {"default": False}),
                 "node_switch": ("INT", {"default": 0, "min": 0, "max": 1, "step": 1}),
+                "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
             },
         }
 
@@ -95,6 +101,7 @@ class ZhiYiDWPoseDetectNodeV2(ZhiYiDWPoseDetectNode):
         timeout,
         health_check=False,
         node_switch=0,
+        image_delivery=IMAGE_DELIVERY_BASE64,
     ):
         if node_switch == 1:
             return (
@@ -130,6 +137,7 @@ class ZhiYiDWPoseDetectNodeV2(ZhiYiDWPoseDetectNode):
                     timeout,
                     return_pose_image,
                     return_openpose_json,
+                    image_delivery,
                 ),
             ))
 
@@ -137,6 +145,7 @@ class ZhiYiDWPoseDetectNodeV2(ZhiYiDWPoseDetectNode):
         results = self._run_concurrent(tasks, max_concurrency)
         info = {
             "service_url": final_service_url,
+            "image_delivery": image_delivery,
             "resolution": int(resolution),
             "detect_body": bool(detect_body),
             "detect_hand": bool(detect_hand),
@@ -156,7 +165,7 @@ class ZhiYiDWPoseDetectNodeV2(ZhiYiDWPoseDetectNode):
 
 
 class ZhiYiLineArtPreprocessorNodeV2(_ControlNetAuxApiBase):
-    """知衣 LineArt 线稿预处理节点 V2 - 支持灰度/开发环境一键切换与 return_image 开关。"""
+    """知衣 LineArt 线稿预处理节点 V2 - 支持灰度/开发/海外环境一键切换与 return_image 开关。"""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -165,7 +174,7 @@ class ZhiYiLineArtPreprocessorNodeV2(_ControlNetAuxApiBase):
                 "image": ("IMAGE",),
                 "env": (service_env_options(), {
                     "default": "灰度环境",
-                    "tooltip": "灰度/开发环境使用内置地址（忽略 service_url 与 FD_* 环境变量）；自定义使用 service_url",
+                    "tooltip": "灰度/开发/海外环境使用内置地址（忽略 service_url 与 FD_* 环境变量）；自定义使用 service_url",
                 }),
                 "service_url": ("STRING", {
                     "default": FD_CONTROLNET_AUX_LINEART_URL or "http://model-api-dwpose-svc.online-server-gray:8001/v1/lineart",
@@ -197,6 +206,7 @@ class ZhiYiLineArtPreprocessorNodeV2(_ControlNetAuxApiBase):
             "optional": {
                 "health_check": ("BOOLEAN", {"default": False}),
                 "node_switch": ("INT", {"default": 0, "min": 0, "max": 1, "step": 1}),
+                "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
             },
         }
 
@@ -219,6 +229,7 @@ class ZhiYiLineArtPreprocessorNodeV2(_ControlNetAuxApiBase):
         timeout,
         health_check=False,
         node_switch=0,
+        image_delivery=IMAGE_DELIVERY_BASE64,
     ):
         resolved_base = resolve_service_env(env, DWPOSE_SERVICE_ENVS)
         return self._execute(
@@ -235,13 +246,14 @@ class ZhiYiLineArtPreprocessorNodeV2(_ControlNetAuxApiBase):
             health_check=health_check,
             node_switch=node_switch,
             service_url_preset=CUSTOM_SERVICE_URL_PRESET,
+            image_delivery=image_delivery,
             extra={"coarse": bool(coarse), "return_image": bool(return_image)},
             info_extra={"coarse": bool(coarse), "return_image": bool(return_image)},
         )
 
 
 class ZhiYiDepthAnythingV2PreprocessorNodeV2(_ControlNetAuxApiBase):
-    """知衣 Depth Anything V2 深度图预处理节点 V2 - 支持灰度/开发环境一键切换。"""
+    """知衣 Depth Anything V2 深度图预处理节点 V2 - 支持灰度/开发/海外环境一键切换。"""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -250,7 +262,7 @@ class ZhiYiDepthAnythingV2PreprocessorNodeV2(_ControlNetAuxApiBase):
                 "image": ("IMAGE",),
                 "env": (service_env_options(), {
                     "default": "灰度环境",
-                    "tooltip": "灰度/开发环境使用内置地址（忽略 service_url 与 FD_* 环境变量）；自定义使用 service_url",
+                    "tooltip": "灰度/开发/海外环境使用内置地址（忽略 service_url 与 FD_* 环境变量）；自定义使用 service_url",
                 }),
                 "service_url": ("STRING", {
                     "default": FD_CONTROLNET_AUX_DEPTH_ANYTHING_V2_URL or "http://model-api-dwpose-svc.online-server-gray:8001/v1/depth-anything-v2",
@@ -286,6 +298,7 @@ class ZhiYiDepthAnythingV2PreprocessorNodeV2(_ControlNetAuxApiBase):
             "optional": {
                 "health_check": ("BOOLEAN", {"default": False}),
                 "node_switch": ("INT", {"default": 0, "min": 0, "max": 1, "step": 1}),
+                "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
             },
         }
 
@@ -307,6 +320,7 @@ class ZhiYiDepthAnythingV2PreprocessorNodeV2(_ControlNetAuxApiBase):
         timeout,
         health_check=False,
         node_switch=0,
+        image_delivery=IMAGE_DELIVERY_BASE64,
     ):
         resolved_base = resolve_service_env(env, DWPOSE_SERVICE_ENVS)
         return self._execute(
@@ -323,6 +337,7 @@ class ZhiYiDepthAnythingV2PreprocessorNodeV2(_ControlNetAuxApiBase):
             health_check=health_check,
             node_switch=node_switch,
             service_url_preset=CUSTOM_SERVICE_URL_PRESET,
+            image_delivery=image_delivery,
             extra={"max_depth": float(max_depth)},
             info_extra={"max_depth": float(max_depth)},
         )

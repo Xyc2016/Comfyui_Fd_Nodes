@@ -8,6 +8,8 @@ import torch
 from PIL import Image
 
 from src.Comfyui_Fd_Nodes import zhiyi_dwpose_detect_node as dwpose_module
+from src.Comfyui_Fd_Nodes.utils import image_payload as payload_module
+from src.Comfyui_Fd_Nodes.v2.controlnet_aux_v2_node import ZhiYiDWPoseDetectNodeV2
 from src.Comfyui_Fd_Nodes.config import CUSTOM_SERVICE_URL_PRESET
 from src.Comfyui_Fd_Nodes.nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 from src.Comfyui_Fd_Nodes.zhiyi_dwpose_detect_node import (
@@ -66,9 +68,9 @@ def test_dwpose_node_metadata():
     assert input_types["required"]["detect_face"][1]["default"] is False
     assert "health_check" in input_types["optional"]
     assert "node_switch" in input_types["optional"]
-    assert list(input_types["optional"])[-1] == "service_url_preset"
+    assert list(input_types["optional"])[-2:] == ["service_url_preset", "image_delivery"]
     preset_options, preset_config = input_types["optional"]["service_url_preset"]
-    assert preset_options == [CUSTOM_SERVICE_URL_PRESET, "K8s 灰度", "10.1.0.230"]
+    assert preset_options == [CUSTOM_SERVICE_URL_PRESET, "K8s 灰度", "海外接入", "10.1.0.230"]
     assert preset_config["default"] == CUSTOM_SERVICE_URL_PRESET
     assert ZhiYiDWPoseDetectNode.RETURN_TYPES == ("IMAGE", "POSE_KEYPOINT", "JSON")
     assert ZhiYiDWPoseDetectNode.RETURN_NAMES == ("POSE_IMAGE", "POSE_KEYPOINT", "INFO")
@@ -181,6 +183,38 @@ def test_detect_pose_preset_overrides_custom_url(monkeypatch):
     )
 
     assert json.loads(info_text)["service_url"] == "http://10.1.0.230:8003/v1/pose"
+
+
+def test_detect_pose_overseas_preset_resolves_gateway_url(monkeypatch):
+    node = ZhiYiDWPoseDetectNode()
+
+    def fake_request(method, url, timeout, **kwargs):
+        assert url == (
+            "http://fd-oversease-access-hz.external.sometimes.cn"
+            "/gpu/online-server-gray/model-api-dwpose/v1/pose"
+        )
+        return DummyResponse(data=_pose_response())
+
+    monkeypatch.setattr(dwpose_module.requests, "request", fake_request)
+
+    _, _, info_text = node.detect_pose(
+        image=torch.zeros((1, 2, 2, 3), dtype=torch.float32),
+        service_url="https://custom.example.com/v1/pose",
+        resolution=512,
+        detect_body=True,
+        detect_hand=True,
+        detect_face=False,
+        xinsr_stick_scaling=False,
+        upscale_method="INTER_CUBIC",
+        max_concurrency=1,
+        timeout=30,
+        service_url_preset="海外接入",
+    )
+
+    assert json.loads(info_text)["service_url"] == (
+        "http://fd-oversease-access-hz.external.sometimes.cn"
+        "/gpu/online-server-gray/model-api-dwpose/v1/pose"
+    )
 
 
 def test_detect_pose_rejects_unknown_preset_but_node_switch_still_short_circuits(monkeypatch):
@@ -409,3 +443,46 @@ def test_timeout_is_normalized(monkeypatch):
             health_check=False,
             node_switch=0,
         )
+
+
+@pytest.mark.parametrize("node_class", [ZhiYiDWPoseDetectNode, ZhiYiDWPoseDetectNodeV2])
+def test_url_delivery_uses_oss_and_keeps_response_format(monkeypatch, node_class):
+    calls, uploads = [], []
+    def upload(path, data):
+        uploads.append(data)
+        return "https://bucket.oss-cn-hangzhou.aliyuncs.com/pose.png"
+    def request(method, url, timeout, **kwargs):
+        assert kwargs["headers"]["Authorization"] == "Bearer pose-key"
+        if method == "GET":
+            return DummyResponse(data={"status": "ok", "loaded": True})
+        calls.append(kwargs["json"])
+        return DummyResponse(data=_pose_response())
+    monkeypatch.setattr(payload_module, "upload_bytes_to_oss", upload)
+    monkeypatch.setattr(dwpose_module, "FD_DWPOSE_API_KEY", "pose-key")
+    monkeypatch.setattr(dwpose_module.requests, "request", request)
+    extra = {"env": "custom", "return_pose_image": True, "return_openpose_json": True} if node_class is ZhiYiDWPoseDetectNodeV2 else {}
+    result = node_class().detect_pose(
+        image=torch.zeros((1, 2, 2, 3)), service_url="https://example.com/v1/pose",
+        resolution=512, detect_body=True, detect_hand=True, detect_face=False,
+        xinsr_stick_scaling=False, upscale_method="INTER_CUBIC", max_concurrency=1,
+        timeout=120, health_check=True, image_delivery="url", **extra,
+    )
+    assert len(uploads) == len(calls) == 1
+    assert calls[0]["image"] == "https://bucket.oss-cn-hangzhou-internal.aliyuncs.com/pose.png"
+    assert calls[0]["image_format"] == "png_base64"
+    assert result[0].shape == (1, 2, 2, 3)
+    assert json.loads(result[2])["image_delivery"] == "url"
+
+
+def test_url_delivery_node_switch_does_not_upload(monkeypatch):
+    def unexpected(*args, **kwargs):
+        pytest.fail("跳过节点不应上传或调用服务")
+    monkeypatch.setattr(payload_module, "upload_bytes_to_oss", unexpected)
+    monkeypatch.setattr(dwpose_module.requests, "request", unexpected)
+    result = ZhiYiDWPoseDetectNode().detect_pose(
+        image=torch.zeros((1, 2, 2, 3)), service_url="https://example.com/v1/pose",
+        resolution=512, detect_body=True, detect_hand=True, detect_face=False,
+        xinsr_stick_scaling=False, upscale_method="INTER_CUBIC", max_concurrency=1,
+        timeout=120, node_switch=1, image_delivery="url",
+    )
+    assert json.loads(result[2])["skipped"] is True

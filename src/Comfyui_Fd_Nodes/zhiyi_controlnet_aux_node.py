@@ -17,8 +17,16 @@ from .config import (
     DWPOSE_SERVICE_URL_PRESETS,
     FD_CONTROLNET_AUX_DEPTH_ANYTHING_V2_URL,
     FD_CONTROLNET_AUX_LINEART_URL,
+    FD_DWPOSE_API_KEY,
 )
 from .utils.error_utils import ERROR_TIMEOUT, normalize_error_message
+from .utils.image_payload import (
+    IMAGE_DELIVERY_BASE64,
+    IMAGE_DELIVERY_OPTIONS,
+    auth_headers,
+    image_delivery_input_config,
+    tensor_to_image_payload,
+)
 from .utils.logging_utils import configure_default_logging
 from .utils.service_url import resolve_service_url_preset, service_url_preset_options
 
@@ -101,11 +109,7 @@ class _ControlNetAuxApiBase:
         return Image.fromarray(arr[..., :3]).convert("RGB")
 
     def _tensor_to_png_data_url(self, image_tensor):
-        image = self._image_tensor_to_rgb_pil(image_tensor)
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
-        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-        return f"data:image/png;base64,{encoded}"
+        return tensor_to_image_payload(image_tensor, IMAGE_DELIVERY_BASE64)
 
     def _decode_png_data_url(self, value, field_name):
         if not isinstance(value, str) or not value:
@@ -180,7 +184,7 @@ class _ControlNetAuxApiBase:
         response = self._request_with_retry(
             "POST",
             service_url,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", **auth_headers(FD_DWPOSE_API_KEY)},
             json=payload,
             timeout=timeout,
             retry_count=1,
@@ -199,7 +203,10 @@ class _ControlNetAuxApiBase:
 
     def _check_health(self, service_url, timeout, health_key):
         health_url = _health_url(service_url)
-        response = self._request_with_retry("GET", health_url, timeout=timeout, retry_count=0)
+        response = self._request_with_retry(
+            "GET", health_url, timeout=timeout, retry_count=0,
+            headers=auth_headers(FD_DWPOSE_API_KEY),
+        )
         if response.status_code >= 400:
             raise RuntimeError(f"ControlNet 预处理 health check 失败: {response.status_code}\n{response.text[:500]}")
         try:
@@ -254,15 +261,21 @@ class _ControlNetAuxApiBase:
             raise RuntimeError(f"{label} 失败:\n" + "\n".join(errors))
         return results
 
-    def _single_request(self, idx, image_tensor, service_url, payload_extra, timeout):
+    def _single_request(
+        self, idx, image_tensor, service_url, payload_extra, timeout,
+        image_delivery=IMAGE_DELIVERY_BASE64,
+    ):
         original_image = self._image_tensor_to_rgb_pil(image_tensor)
         payload = self._build_common_payload(
-            self._tensor_to_png_data_url(image_tensor),
+            tensor_to_image_payload(image_tensor, image_delivery),
             payload_extra["resolution"],
             payload_extra["upscale_method"],
         )
         payload.update(payload_extra["extra"])
-        logger.info("Calling %s API idx=%s service_url=%s resolution=%s", payload_extra["label"], idx, service_url, payload_extra["resolution"])
+        logger.info(
+            "Calling %s API idx=%s service_url=%s resolution=%s image_delivery=%s",
+            payload_extra["label"], idx, service_url, payload_extra["resolution"], image_delivery,
+        )
         result = self._post_preprocess(
             service_url,
             payload,
@@ -314,6 +327,7 @@ class _ControlNetAuxApiBase:
         service_url_preset,
         extra,
         info_extra,
+        image_delivery=IMAGE_DELIVERY_BASE64,
     ):
         if node_switch == 1:
             return (
@@ -341,12 +355,17 @@ class _ControlNetAuxApiBase:
         }
         tasks = []
         for idx, image_tensor in enumerate(image_tensors):
-            tasks.append((idx, self._single_request, (idx, image_tensor, final_service_url, payload_extra, timeout)))
+            tasks.append((
+                idx,
+                self._single_request,
+                (idx, image_tensor, final_service_url, payload_extra, timeout, image_delivery),
+            ))
 
         print(f"[{label}] 处理 {len(tasks)} 张图片，并发上限 {max_concurrency}")
         results = self._run_concurrent(tasks, max_concurrency, label)
         info = {
             "service_url": final_service_url,
+            "image_delivery": image_delivery,
             "resolution": int(resolution),
             "upscale_method": upscale_method,
             **info_extra,
@@ -399,6 +418,7 @@ class ZhiYiLineArtPreprocessorNode(_ControlNetAuxApiBase):
                     "default": CUSTOM_SERVICE_URL_PRESET,
                     "tooltip": "选择部署预设时忽略 service_url；选择自定义时使用 service_url 文本框",
                 }),
+                "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
             },
         }
 
@@ -420,6 +440,7 @@ class ZhiYiLineArtPreprocessorNode(_ControlNetAuxApiBase):
         health_check=False,
         node_switch=0,
         service_url_preset=None,
+        image_delivery=IMAGE_DELIVERY_BASE64,
     ):
         return self._execute(
             image=image,
@@ -435,6 +456,7 @@ class ZhiYiLineArtPreprocessorNode(_ControlNetAuxApiBase):
             health_check=health_check,
             node_switch=node_switch,
             service_url_preset=service_url_preset,
+            image_delivery=image_delivery,
             extra={"coarse": bool(coarse)},
             info_extra={"coarse": bool(coarse)},
         )
@@ -486,6 +508,7 @@ class ZhiYiDepthAnythingV2PreprocessorNode(_ControlNetAuxApiBase):
                     "default": CUSTOM_SERVICE_URL_PRESET,
                     "tooltip": "选择部署预设时忽略 service_url；选择自定义时使用 service_url 文本框",
                 }),
+                "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
             },
         }
 
@@ -507,6 +530,7 @@ class ZhiYiDepthAnythingV2PreprocessorNode(_ControlNetAuxApiBase):
         health_check=False,
         node_switch=0,
         service_url_preset=None,
+        image_delivery=IMAGE_DELIVERY_BASE64,
     ):
         return self._execute(
             image=image,
@@ -522,6 +546,7 @@ class ZhiYiDepthAnythingV2PreprocessorNode(_ControlNetAuxApiBase):
             health_check=health_check,
             node_switch=node_switch,
             service_url_preset=service_url_preset,
+            image_delivery=image_delivery,
             extra={"max_depth": float(max_depth)},
             info_extra={"max_depth": float(max_depth)},
         )
