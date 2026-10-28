@@ -2,6 +2,8 @@
 
 import base64
 import io
+import os
+from urllib.parse import urlsplit
 
 import numpy as np
 from PIL import Image
@@ -9,17 +11,32 @@ from PIL import Image
 from ..config import FD_OSS_URL_PATH_PREFIX_GPU_INPUT
 from .common_util import bytes_calculate_hex_md5
 from .oss_client import upload_bytes_to_oss
-from .url_utils import normalize_oss_url
+from .url_utils import is_url_delivery_required, normalize_oss_url
 
 IMAGE_DELIVERY_BASE64 = "base64"
 IMAGE_DELIVERY_URL = "url"
 IMAGE_DELIVERY_OPTIONS = [IMAGE_DELIVERY_BASE64, IMAGE_DELIVERY_URL]
 
 
+def resolve_image_delivery(image_delivery=None) -> str:
+    """显式海外部署或全局 URL 门控禁止降级；国内缺省保持 base64。
+
+    不读取 config.FD_OVERSEAS_GPU_GATEWAY：该常量有供 UI 选项使用的默认地址。
+    """
+    configured = os.environ.get("FD_IMAGE_DELIVERY", "").strip().lower()
+    if configured and configured not in IMAGE_DELIVERY_OPTIONS:
+        raise RuntimeError(f"未知的 FD_IMAGE_DELIVERY: {configured}")
+    if image_delivery is not None and image_delivery not in IMAGE_DELIVERY_OPTIONS:
+        raise RuntimeError(f"未知的 image_delivery: {image_delivery}；可选值为: {', '.join(IMAGE_DELIVERY_OPTIONS)}")
+    if is_url_delivery_required():
+        return IMAGE_DELIVERY_URL
+    return image_delivery or configured or IMAGE_DELIVERY_BASE64
+
+
 def image_delivery_input_config() -> dict:
     """image_delivery 下拉的注册配置，各节点保持一致。"""
     return {
-        "default": IMAGE_DELIVERY_BASE64,
+        "default": resolve_image_delivery(),
         "tooltip": (
             "图片传给服务端的方式：base64 为原方式；url 先上传 OSS 再传链接"
             "（大图/海外网关场景减少请求体，需配置 FD_OSS_*；服务端要下载图片，timeout 建议 ≥60 秒）"
@@ -50,7 +67,17 @@ def tensor_to_png_bytes(image_tensor) -> bytes:
     return buffer.getvalue()
 
 
-def _upload_png_bytes_to_oss_url(png_bytes: bytes) -> str:
+def require_http_image_url(url) -> str:
+    """上传结果必须是可供下游 GET 的 HTTP(S) 引用。"""
+    if not isinstance(url, str):
+        raise RuntimeError("图片上传未返回有效的 HTTP(S) URL")
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or any(c.isspace() for c in url):
+        raise RuntimeError("图片上传未返回有效的 HTTP(S) URL")
+    return url
+
+
+def _upload_png_bytes_to_oss_url(png_bytes: bytes, *, internal=True) -> str:
     object_path = f"{FD_OSS_URL_PATH_PREFIX_GPU_INPUT.rstrip('/')}/{bytes_calculate_hex_md5(png_bytes)}.png"
     try:
         url = upload_bytes_to_oss(object_path, png_bytes)
@@ -58,14 +85,19 @@ def _upload_png_bytes_to_oss_url(png_bytes: bytes) -> str:
         raise RuntimeError(
             f"image_delivery=url 上传 OSS 失败（请检查 FD_OSS_* 配置或网络）: {exc}"
         ) from exc
-    # 服务端在杭州集群内，走内网 endpoint 下载；自定义域名前缀时原样返回
-    return normalize_oss_url(url)
+    url = require_http_image_url(url)
+    # 杭州 GPU 服务保留内网下载；图生文的 LiteLLM HTTP 引用使用原始公网 URL。
+    return normalize_oss_url(url) if internal or is_url_delivery_required() else url
 
 
-def tensor_to_image_payload(image_tensor, image_delivery) -> str:
-    """构造 payload 的 image 字段值：base64 → data URL；url → OSS 内网链接。"""
+def tensor_to_image_payload(image_tensor, image_delivery=None, *, internal=True) -> str:
+    """构造图片引用：国内 base64 保持 data URL，海外仅使用 OSS URL。"""
+    image_delivery = resolve_image_delivery(image_delivery)
     if image_delivery == IMAGE_DELIVERY_URL:
-        return _upload_png_bytes_to_oss_url(tensor_to_png_bytes(image_tensor))
+        png_bytes = tensor_to_png_bytes(image_tensor)
+        if internal:
+            return _upload_png_bytes_to_oss_url(png_bytes)
+        return _upload_png_bytes_to_oss_url(png_bytes, internal=False)
     if image_delivery != IMAGE_DELIVERY_BASE64:
         raise RuntimeError(
             f"未知的 image_delivery: {image_delivery}；可选值为: {', '.join(IMAGE_DELIVERY_OPTIONS)}"

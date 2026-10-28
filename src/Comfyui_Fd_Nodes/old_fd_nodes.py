@@ -11,6 +11,8 @@ from .config import (
     FD_OSS_URL_PATH_PREFIX,
 )
 from .utils.oss_client import upload_bytes_to_oss
+from .utils.image_payload import IMAGE_DELIVERY_URL, require_http_image_url, tensor_to_image_payload
+from .utils.url_utils import is_url_delivery_required
 
 
 class FD_Upload:
@@ -33,6 +35,8 @@ class FD_Upload:
     CATEGORY = "image/upload"
 
     def gen(self, image):
+        if is_url_delivery_required():
+            return (tensor_to_image_payload(image, IMAGE_DELIVERY_URL, internal=False),)
         file = pil2iobyte(tensor2pil(image))
         if file is None:
             print('bytes_upload_file:: image_bytes is None')
@@ -135,6 +139,8 @@ class FD_imgToText_Doubao:
     CATEGORY = "image/captioning"
 
     def gen(self, image_url, prompt, defaultPrompt):
+        if is_url_delivery_required():
+            require_http_image_url(image_url)
         headers = {"Content-Type": "application/json"}
         if FD_DOUBAO_KEY:
             headers["Authorization"] = "Bearer " + FD_DOUBAO_KEY

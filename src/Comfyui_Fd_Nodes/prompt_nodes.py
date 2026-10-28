@@ -5,6 +5,8 @@ import io
 import os
 import numpy as np
 from PIL import Image
+from .utils.image_payload import IMAGE_DELIVERY_URL, require_http_image_url, tensor_to_image_payload
+from .utils.url_utils import is_url_delivery_required
 from .config import (
     FD_LITELLM_API_KEY,
     FD_LITELLM_BASE_URL,
@@ -313,6 +315,9 @@ class EcommercePromptGenerator:
     def tensor_to_base64(self, image, index=0):
         if image is None:
             return None
+        if is_url_delivery_required():
+            selected = image[index] if image.ndim == 4 else image
+            return tensor_to_image_payload(selected, IMAGE_DELIVERY_URL, internal=False)
 
         img_tensor = image
         try:
@@ -355,6 +360,8 @@ class EcommercePromptGenerator:
                         return base64_images
                     base64_images.append(self.tensor_to_base64(img, 0))
             except Exception:
+                if is_url_delivery_required():
+                    raise
                 if len(base64_images) >= max_images:
                     return base64_images
                 base64_images.append(self.tensor_to_base64(img, 0))
@@ -384,6 +391,8 @@ class EcommercePromptGenerator:
             for base64_image in base64_images:
                 if not base64_image:
                     continue
+                if is_url_delivery_required():
+                    require_http_image_url(base64_image)
                 content_list.append({
                     "type": "image_url",
                     "image_url": {"url": base64_image}

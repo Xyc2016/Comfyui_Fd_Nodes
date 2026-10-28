@@ -1,5 +1,6 @@
 import io
 import logging
+import os
 import traceback
 from typing import Optional, Tuple
 
@@ -12,7 +13,7 @@ from .common_util import bytes_calculate_hex_md5, downscale_image_tensor
 from .error_utils import ERROR_TIMEOUT, normalize_error_message
 from .gpt_image_request import GptImageRequestMixin
 from .oss_client import upload_bytes_to_oss
-from .url_utils import normalize_oss_url
+from .url_utils import is_url_delivery_required, normalize_oss_url
 from .logging_utils import configure_default_logging
 
 configure_default_logging()
@@ -23,7 +24,7 @@ class GptImageEditClient:
     """GPT Image 图生图统一客户端。
 
     - backend="image_generation"（默认）：上传图片到 OSS，POST {FD_GPT_IMAGE_EDIT_URL}/image/edit
-    - backend="litellm"：走旧 multipart {FD_LITELLM_BASE_URL}/v1/images/edits
+    - backend="litellm"：国内走旧 multipart；URL 严格模式使用已配置的 image/edit 服务，否则显式拒绝
     """
 
     # VIP 路由（gpt-image-2.5-vip）按链回退最多 3 次尝试，上游文档建议客户端读取超时 600 秒。
@@ -51,6 +52,9 @@ class GptImageEditClient:
     ):
         self.backend = backend or FD_GPT_IMAGE_BACKEND or "image_generation"
         self.edit_url = edit_url or FD_GPT_IMAGE_EDIT_URL
+        self._has_explicit_url_service = bool(
+            edit_url or os.getenv("FD_GPT_IMAGE_EDIT_URL", "").strip() or os.getenv("FD_GEMINI_URL", "").strip()
+        )
         self.oss_uploader = oss_uploader or upload_bytes_to_oss
         self._request_post = request_post or requests.post
         self._request_get = request_get or requests.get
@@ -233,6 +237,25 @@ class GptImageEditClient:
         out_request_id: str,
         model: str,
     ) -> Tuple[BytesIO, str, str]:
+        if is_url_delivery_required():
+            # config already derives /image/edit from FD_GEMINI_URL. Preserve
+            # the requested model as channel; never invent a LiteLLM URL schema.
+            if self._has_explicit_url_service:
+                return self._edit_via_image_generation(
+                    image_tensors=image_tensors,
+                    model=model,
+                    prompt=prompt,
+                    size=size,
+                    aspect_ratio=aspect_ratio,
+                    quality=quality,
+                    resize=resize,
+                    out_request_id=out_request_id,
+                )
+            raise NotImplementedError(
+                "Unsupported: GPT Image LiteLLM /v1/images/edits uses binary multipart; "
+                "URL input is not verified for this backend. "
+                "Set FD_GPT_IMAGE_BACKEND=image_generation to use the URL-based /image/edit service."
+            )
         mixin = _LiteLLMAdapter()
         multipart_files = []
         for idx, image_tensor in enumerate(image_tensors):
