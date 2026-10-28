@@ -1,7 +1,10 @@
 """Tests for zhiyi_qwen_detect_node parsing logic (no real API calls)."""
 
 import json
+from unittest.mock import Mock, call
 
+import pytest
+import requests
 import torch
 
 from src.Comfyui_Fd_Nodes import zhiyi_qwen_detect_node as qwen_module
@@ -382,3 +385,152 @@ class TestQwenDetectNodeMetadata:
         assert json.loads(json_output) == [{"bbox_2d": [2, 2, 10, 8], "label": "bag"}]
         assert bboxes == [[2, 2, 10, 8]]
         assert bboxes_for_sam2 == [[[2, 2, 10, 8]]]
+
+
+def _json_response(status_code: int, body: dict[str, object]) -> requests.Response:
+    response = requests.Response()
+    response.status_code = status_code
+    response._content = json.dumps(body).encode("utf-8")
+    return response
+
+
+DetectionMocks = tuple[ZhiYiQwenDetectNode, Mock, Mock, Mock]
+
+
+@pytest.fixture
+def detection_mocks(monkeypatch: pytest.MonkeyPatch) -> DetectionMocks:
+    node = ZhiYiQwenDetectNode()
+    upload = Mock(return_value=["https://oss.example.com/qwen-input.png"])
+    post = Mock(return_value=_json_response(200, {
+        "choices": [{
+            "finish_reason": "stop",
+            "message": {"content": '[{"bbox_2d":[100,200,500,800],"label":"bag","score":0.9}]'},
+        }],
+    }))
+    sleep = Mock()
+    monkeypatch.setattr(node.gemini_client, "upload_images", upload)
+    monkeypatch.setattr(qwen_module.requests, "post", post)
+    monkeypatch.setattr(qwen_module.time, "sleep", sleep)
+    return node, upload, post, sleep
+
+
+def test_detect_retries_upstream_image_download_timeout(detection_mocks: DetectionMocks) -> None:
+    node, upload, post, sleep = detection_mocks
+    failure = _json_response(400, {"error": {
+        "message": "litellm.BadRequestError: OpenAIException - Timeout while downloading "
+                   "url=https://oss.example.com/qwen-input.png Request id: test-request-id",
+        "type": "BadRequest",
+        "param": "image_url",
+        "code": "400",
+    }})
+    post.side_effect = [failure, failure, post.return_value]
+
+    result = node.detect(torch.zeros((1, 10, 20, 3)), "bag", model="doubao-seed-2-0-mini")
+
+    assert json.loads(result[0]) == [{"bbox_2d": [2, 2, 10, 8], "label": "bag"}]
+    assert result[1:] == ([[2, 2, 10, 8]], [[[2, 2, 10, 8]]])
+    upload.assert_called_once()
+    assert post.call_count == 3
+    assert post.call_args_list == [post.call_args_list[0]] * 3
+    payload = json.loads(post.call_args.kwargs["data"])
+    assert payload["model"] == "doubao-seed-2-0-mini"
+    assert payload["messages"][1]["content"][0]["image_url"]["url"] == "https://oss.example.com/qwen-input.png"
+    assert sleep.call_args_list == [call(1), call(2)]
+
+
+@pytest.mark.parametrize("status_code", [408, 429, 500, 502, 503, 504])
+def test_detect_retries_transient_http_errors(detection_mocks: DetectionMocks, status_code: int) -> None:
+    node, _, post, sleep = detection_mocks
+    post.side_effect = [_json_response(status_code, {"error": "temporarily unavailable"}), post.return_value]
+
+    assert node.detect(torch.zeros((1, 10, 20, 3)), "bag")[1] == [[2, 2, 10, 8]]
+    assert post.call_count == 2
+    sleep.assert_called_once_with(1)
+
+
+@pytest.mark.parametrize("error_type", [requests.exceptions.Timeout, requests.exceptions.ConnectionError])
+def test_detect_retries_network_errors(detection_mocks: DetectionMocks, error_type: type[Exception]) -> None:
+    node, _, post, sleep = detection_mocks
+    post.side_effect = [error_type("temporary network failure"), post.return_value]
+
+    assert node.detect(torch.zeros((1, 10, 20, 3)), "bag")[1] == [[2, 2, 10, 8]]
+    assert post.call_count == 2
+    sleep.assert_called_once_with(1)
+
+
+@pytest.mark.parametrize("failure_kind", ["http", "timeout", "connection"])
+def test_detect_stops_after_retry_budget_and_preserves_last_error(detection_mocks: DetectionMocks, failure_kind: str) -> None:
+    node, upload, post, sleep = detection_mocks
+    if failure_kind == "http":
+        post.side_effect = [
+            _json_response(400, {"error": f"Timeout while downloading url=test.png Request id: request-{i}"})
+            for i in range(3)
+        ]
+        expected_error = "request-2"
+    else:
+        error_type = requests.exceptions.Timeout if failure_kind == "timeout" else requests.exceptions.ConnectionError
+        post.side_effect = [error_type(f"network failure {i}") for i in range(3)]
+        expected_error = "network failure 2"
+
+    with pytest.raises(RuntimeError, match=expected_error) as exc_info:
+        node.detect(torch.zeros((1, 10, 20, 3)), "bag")
+
+    if failure_kind == "timeout":
+        assert str(exc_info.value).startswith("TIMEOUT:")
+    assert post.call_count == 3
+    assert sleep.call_args_list == [call(1), call(2)]
+    upload.assert_called_once()
+
+
+@pytest.mark.parametrize(("status_code", "message"), [
+    (400, "invalid image_url"),
+    (400, "unsupported model parameter"),
+    (401, "Timeout while downloading url=test.png"),
+    (403, "permission denied"),
+    (404, "model not found"),
+])
+def test_detect_does_not_retry_permanent_http_errors(detection_mocks: DetectionMocks, status_code: int, message: str) -> None:
+    node, _, post, sleep = detection_mocks
+    post.return_value = _json_response(status_code, {"error": message})
+
+    with pytest.raises(RuntimeError, match=str(status_code)):
+        node.detect(torch.zeros((1, 10, 20, 3)), "bag")
+
+    post.assert_called_once()
+    sleep.assert_not_called()
+
+
+def test_detect_can_disable_retries(detection_mocks: DetectionMocks) -> None:
+    node, _, post, sleep = detection_mocks
+    post.return_value = _json_response(503, {"error": "service unavailable"})
+
+    with pytest.raises(RuntimeError, match="503"):
+        node.detect(torch.zeros((1, 10, 20, 3)), "bag", retry_count=0)
+
+    post.assert_called_once()
+    sleep.assert_not_called()
+
+
+def test_detect_caps_retry_count(detection_mocks: DetectionMocks) -> None:
+    node, _, post, sleep = detection_mocks
+    post.return_value = _json_response(503, {"error": "service unavailable"})
+
+    with pytest.raises(RuntimeError, match="503"):
+        node.detect(torch.zeros((1, 10, 20, 3)), "bag", retry_count=10)
+
+    assert post.call_count == 6
+    assert sleep.call_args_list == [call(1), call(2), call(2), call(2), call(2)]
+
+
+@pytest.mark.parametrize("invalid_json", [True, False])
+def test_detect_does_not_retry_response_parsing_errors(detection_mocks: DetectionMocks, invalid_json: bool) -> None:
+    node, _, post, sleep = detection_mocks
+    post.return_value = _json_response(200, {"unexpected": "response"})
+    if invalid_json:
+        post.return_value._content = b"invalid JSON"
+
+    with pytest.raises(RuntimeError):
+        node.detect(torch.zeros((1, 10, 20, 3)), "bag")
+
+    post.assert_called_once()
+    sleep.assert_not_called()

@@ -2,6 +2,7 @@ import ast
 import json
 import logging
 import re
+import time
 
 import numpy as np
 import requests
@@ -245,6 +246,53 @@ def _build_chat_url(base_url: str) -> str:
     return f"{base_url}/v1/chat/completions"
 
 
+def _post_chat_with_retries(
+    url: str,
+    api_key: str,
+    payload: dict[str, object],
+    retry_count: int,
+) -> requests.Response:
+    """Retry transient API failures without uploading the input image again."""
+    max_attempts = max(0, min(retry_count, 5)) + 1
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    data = json.dumps(payload)
+    attempt = 0
+    while True:
+        attempt += 1
+        logger.info("Qwen detect request: attempt=%d/%d", attempt, max_attempts)
+        try:
+            response = requests.post(url=url, headers=headers, data=data, timeout=120)
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+            if attempt >= max_attempts:
+                raise
+            reason = f"{type(exc).__name__}: {exc}"
+        else:
+            if response.ok:
+                return response
+
+            status_code = response.status_code
+            response_text = response.text
+            # The upstream vision API reports an image-download timeout as 400.
+            retryable = (
+                status_code in (408, 429)
+                or 500 <= status_code < 600
+                or (status_code == 400 and "timeout while downloading url" in response_text.lower())
+            )
+            if not retryable or attempt >= max_attempts:
+                raise RuntimeError(f"API 请求失败: {status_code}\n{response_text[:1000]}")
+            reason = f"HTTP {status_code}: {response_text[:1000]}"
+
+        delay = min(2 ** (attempt - 1), 2)
+        logger.warning(
+            "Qwen detect request failed: attempt=%d/%d reason=%s; retrying in %ss",
+            attempt, max_attempts, reason, delay,
+        )
+        time.sleep(delay)
+
+
 # ---------------------------------------------------------------------------
 # Prompt construction
 # ---------------------------------------------------------------------------
@@ -283,6 +331,7 @@ class ZhiYiQwenDetectNode:
             "optional": {
                 "node_switch": ("INT", {"default": 0, "min": 0, "max": 1, "step": 1}),
                 "coordinate_format": (["auto", "1000", "01", "pixel"],),
+                "retry_count": ("INT", {"default": 2, "min": 0, "max": 5, "step": 1}),
             },
         }
 
@@ -294,7 +343,7 @@ class ZhiYiQwenDetectNode:
 
     def detect(
         self,
-        image,
+        image: torch.Tensor,
         target: str,
         model: str = "qwen3.6-flash",
         score_threshold: float = 0.0,
@@ -302,7 +351,8 @@ class ZhiYiQwenDetectNode:
         merge_boxes: bool = False,
         node_switch: int = 0,
         coordinate_format: str = "auto",
-    ):
+        retry_count: int = 2,
+    ) -> tuple[str, list[list[int]], list[list[list[int]]]]:
         if node_switch == 1:
             return ("[]", [], [[]])
 
@@ -345,7 +395,7 @@ class ZhiYiQwenDetectNode:
             raise RuntimeError("未配置 FD_LITELLM_API_KEY")
 
         url = _build_chat_url(base_url)
-        payload = {
+        payload: dict[str, object] = {
             "stream": False,
             "model": model,
             "messages": messages,
@@ -361,19 +411,7 @@ class ZhiYiQwenDetectNode:
 
         response = None
         try:
-            response = requests.post(
-                url=url,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                data=json.dumps(payload),
-                timeout=120,
-            )
-            if not response.ok:
-                raise RuntimeError(
-                    f"API 请求失败: {response.status_code}\n{response.text[:1000]}"
-                )
+            response = _post_chat_with_retries(url, api_key, payload, retry_count)
             result = response.json()
 
             choice = result["choices"][0]
