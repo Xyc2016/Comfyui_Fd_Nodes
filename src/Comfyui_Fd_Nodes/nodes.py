@@ -144,6 +144,12 @@ class FD_RemoveWatermark:
                     },
                 ),
             },
+            "optional": {
+                "image_delivery": (["multipart", "url"], {
+                    "default": "multipart",
+                    "tooltip": "url 先上传 OSS，再发送 image_url 表单；海外部署强制使用 URL。",
+                }),
+            },
         }
 
     RETURN_TYPES = ("IMAGE",)
@@ -164,14 +170,14 @@ class FD_RemoveWatermark:
         enable_quality_check: bool,
         fallback_to_original: bool,
         jpeg_quality: int,
+        image_delivery: str = "multipart",
     ) -> Tuple[torch.Tensor]:
+        from .utils.image_payload import tensor_to_image_payload
         from .utils.url_utils import is_url_delivery_required
 
-        if is_url_delivery_required():
-            raise NotImplementedError(
-                "Unsupported: FD_RemoveWatermark 的 /v1/process 仅支持 multipart 图片，"
-                "海外 URL-only 模式禁止发送文件；需先部署支持图片 URL 的去水印接口"
-            )
+        if image_delivery not in {"multipart", "url"}:
+            raise ValueError(f"Unknown watermark image_delivery: {image_delivery}")
+        use_url = is_url_delivery_required() or image_delivery == "url"
         call_id = str(uuid4())[:8]
         print(
             f"FD_RemoveWatermark [{call_id}] Start processing. ",
@@ -192,18 +198,7 @@ class FD_RemoveWatermark:
             },
         )
         try:
-            # Convert ComfyUI tensor to PIL Image (only process first image in batch)
-            img_tensor = image[0]  # [H, W, C] in range [0, 1]
-            img_np = (img_tensor.cpu().numpy() * 255).astype(np.uint8)
-            pil_img = Image.fromarray(img_np)
-
-            # Convert to bytes
-            img_bytes = io.BytesIO()
-            pil_img.save(img_bytes, format="PNG")
-            img_bytes.seek(0)
-
             # Prepare request
-            files = {"image": ("image.png", img_bytes, "image/png")}
             data = {
                 "text_prompt": text_prompt,
                 "threshold": threshold,
@@ -218,8 +213,17 @@ class FD_RemoveWatermark:
             }
 
             print(f"FD_RemoveWatermark [{call_id}] Calling service at {service_url} ...")
-            # Call service
-            response = requests.post(service_url, files=files, data=data, timeout=60)
+            if use_url:
+                data["image_url"] = tensor_to_image_payload(image, "url")
+                response = requests.post(service_url, data=data, timeout=180)
+            else:
+                # Preserve the domestic multipart contract and PNG encoding.
+                img_np = (image[0].cpu().numpy() * 255).astype(np.uint8)
+                img_bytes = io.BytesIO()
+                Image.fromarray(img_np).save(img_bytes, format="PNG")
+                img_bytes.seek(0)
+                files = {"image": ("image.png", img_bytes, "image/png")}
+                response = requests.post(service_url, files=files, data=data, timeout=60)
             response.raise_for_status()
 
             # Convert response back to ComfyUI tensor
@@ -231,6 +235,8 @@ class FD_RemoveWatermark:
             return (result_tensor,)
 
         except Exception as e:
+            if use_url:
+                raise RuntimeError(f"FD_RemoveWatermark [{call_id}] URL request failed: {e}") from e
             # Return original image on any error
             print(f"FD_RemoveWatermark [{call_id}] error: {e}, returning original image")
             return (image,)
