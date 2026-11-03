@@ -21,6 +21,14 @@ URL 模式沿用现有 OSS 上传配置：`FD_OSS_BUCKET_NAME`、`FD_OSS_ENDPOIN
 
 若模型服务开启鉴权，分别配置 `FD_SAM2_API_KEY` 和 `FD_DWPOSE_API_KEY`，节点会对推理与健康检查请求附加 `Authorization: Bearer <KEY>`。未配置时不附加鉴权头。
 
+## 海外 RMBG 仅返回 mask
+
+`ZhiYiRMBGNode` / `ZhiYiRMBGNodeV2` 调用已配置的海外 RMBG 网关时，默认只请求 `return_image=false`、`return_mask=true`、`return_mask_image=false`。国内服务沿用无损 8 位灰度 PNG + Base64 返回 mask；海外用节点保留的原始 RGB 和 mask 合成 Alpha 透明图或 Color 背景换色图，MASK_IMAGE 也在本地生成。INFO 中的三个 return 字段记录实际请求值，`mask_only_response` 标明此路径是否启用。
+
+此优化只匹配 `FD_OVERSEAS_GPU_GATEWAY` 下的 `model-api-dwpose/v1/rmbg`，覆盖旧版 service_url 与 V2 海外环境，其他分割服务和国内地址沿用原返回参数。无需修改工作流；回退时设置 `FD_OVERSEAS_RMBG_MASK_ONLY=0` 并重启 ComfyUI。该开关独立于图片输入编码，本次继续传原尺寸 PNG。
+
+仅 mask 模式要求返回 `image_size` 与原图一致，灰度 PNG 的实际尺寸与 `output_size` 一致，且输出尺寸属于原图尺寸或声明的 `inference_size`。推理尺寸的 mask 按现有 BILINEAR 规则恢复原尺寸；缺失、损坏、错误尺寸、非灰度 PNG 或服务仍返回成图均明确报错，不用空 mask 或成图兜底。该方式保持当前节点使用原图合成的语义，不新增前景颜色细化。
+
 > [!NOTE]
 > This projected was created with a [cookiecutter](https://github.com/Comfy-Org/cookiecutter-comfy-extension) template. It helps you start writing custom nodes without worrying about the Python setup.
 

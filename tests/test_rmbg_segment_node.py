@@ -319,7 +319,8 @@ def test_rmbg_posts_full_payload_and_decodes_outputs(monkeypatch):
     assert result_image.shape == (1, 2, 2, 3)
     assert mask.shape == (1, 2, 2)
     assert mask_image.shape == (1, 2, 2, 3)
-    assert torch.equal(result_image[0, 0, 0], torch.tensor([0.0, 1.0, 0.0]))
+    # The image output uses the original RGB and mask, not the server's green image.
+    assert torch.equal(result_image[0, 0, 0], torch.tensor([0.0, 0.0, 0.0]))
     assert torch.equal(mask, torch.tensor([[[1.0, 0.0], [0.0, 1.0]]]))
     assert torch.equal(mask_image[0, 0, 0], torch.tensor([1.0, 0.0, 0.0]))
     assert info["service_url"] == "http://example.com:8003/v1/rmbg"
@@ -422,7 +423,7 @@ def test_body_health_check_and_process_res_ignored_notice(monkeypatch):
     assert info["items"][0]["preprocessor"] == "BodySegmentPreprocessor"
 
 
-def test_node_switch_returns_original_and_empty_mask_without_request(monkeypatch):
+def test_node_switch_returns_transparent_image_and_empty_mask_without_request(monkeypatch):
     node = ZhiYiFashionSegmentNode()
     image = torch.ones((1, 2, 2, 3), dtype=torch.float32)
 
@@ -450,7 +451,7 @@ def test_node_switch_returns_original_and_empty_mask_without_request(monkeypatch
         node_switch=1,
     )
 
-    assert torch.equal(result_image, image)
+    assert torch.equal(result_image, torch.zeros((1, 2, 2, 4), dtype=torch.float32))
     assert torch.equal(mask, torch.zeros((1, 2, 2), dtype=torch.float32))
     assert torch.equal(mask_image, torch.zeros((1, 2, 2, 3), dtype=torch.float32))
     assert json.loads(info_text)["skipped"] is True

@@ -2,6 +2,7 @@ import base64
 import io
 import json
 import logging
+import os
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -18,6 +19,7 @@ from .config import (
     FD_CLOTHES_SEGMENT_URL,
     FD_DWPOSE_API_KEY,
     FD_FASHION_SEGMENT_URL,
+    FD_OVERSEAS_DWPOSE_URL,
     FD_RMBG_URL,
     RMBG_SERVICE_URL_PRESETS,
 )
@@ -41,6 +43,17 @@ DEFAULT_CLOTHES_SEGMENT_URL = "http://10.1.0.230:8003/v1/segment/clothes"
 DEFAULT_FASHION_SEGMENT_URL = "http://10.1.0.230:8003/v1/segment/fashion"
 DEFAULT_BODY_SEGMENT_URL = "http://10.1.0.230:8003/v1/segment/body"
 BACKGROUND_MODES = ["Alpha", "Color"]
+FD_OVERSEAS_RMBG_MASK_ONLY = os.getenv("FD_OVERSEAS_RMBG_MASK_ONLY", "1") == "1"
+
+
+def _response_size(result: dict, field: str) -> tuple[int, int]:
+    value = result.get(field)
+    if not isinstance(value, dict):
+        raise RuntimeError(f"RMBG mask 响应缺少 {field} 尺寸")
+    size = (value.get("width"), value.get("height"))
+    if any(type(dimension) is not int or dimension <= 0 for dimension in size):
+        raise RuntimeError(f"RMBG mask 响应 {field} 尺寸无效: {value}")
+    return size
 
 CLOTHES_CLASSES = [
     "Background",
@@ -242,6 +255,27 @@ class _RmbgSegmentApiBase:
             mask_image = mask_image.resize(size, Image.Resampling.BILINEAR)
         mask_array = np.array(mask_image).astype(np.float32) / 255.0
         return torch.from_numpy(np.clip(mask_array, 0.0, 1.0).astype(np.float32)).unsqueeze(0)
+
+    def _rmbg_mask_only_to_tensor(self, result: dict, source_size: tuple[int, int]) -> torch.Tensor:
+        """Validate the native mask before restoring the service's inference size."""
+        mask_image = self._decode_png_data_url(result.get("mask"), "mask")
+        if mask_image.format != "PNG" or mask_image.mode != "L":
+            raise RuntimeError("RMBG mask 必须为 8 位灰度 PNG")
+        image_size = _response_size(result, "image_size")
+        inference_size = _response_size(result, "inference_size")
+        output_size = _response_size(result, "output_size")
+        if image_size != source_size:
+            raise RuntimeError(f"RMBG image_size 与原图尺寸不匹配: {image_size} != {source_size}")
+        if mask_image.size != output_size or output_size not in (source_size, inference_size):
+            raise RuntimeError(
+                f"RMBG mask 尺寸异常: mask={mask_image.size}, output_size={output_size}, "
+                f"image_size={image_size}, inference_size={inference_size}"
+            )
+        if result.get("processed_image") or result.get("mask_image"):
+            raise RuntimeError("RMBG 服务未遵守仅返回 mask 的请求，仍返回 processed_image 或 mask_image")
+        if mask_image.size != source_size:
+            mask_image = mask_image.resize(source_size, Image.Resampling.BILINEAR)
+        return torch.from_numpy(np.array(mask_image).astype(np.float32) / 255.0).unsqueeze(0)
 
     def _empty_mask_tensor(self, size):
         width, height = size
@@ -485,7 +519,9 @@ class _RmbgSegmentApiBase:
         logger.info("Calling %s API idx=%s service_url=%s", label, idx, service_url)
         result = self._post_process(service_url, payload, timeout, label)
 
-        if result.get("mask"):
+        if payload_params["mask_only_response"]:
+            mask = self._rmbg_mask_only_to_tensor(result, original_image.size)
+        elif result.get("mask"):
             mask = self._mask_data_url_to_tensor(result["mask"], original_image.size)
         else:
             mask = self._empty_mask_tensor(original_image.size)
@@ -578,6 +614,13 @@ class _RmbgSegmentApiBase:
             RMBG_SERVICE_URL_PRESETS,
         )
         final_service_url = _normalize_rmbg_segment_url(selected_service_url, default_url, endpoint)
+        mask_only_response = (
+            FD_OVERSEAS_RMBG_MASK_ONLY
+            and endpoint == "rmbg"
+            and final_service_url == f"{FD_OVERSEAS_DWPOSE_URL}/v1/rmbg"
+        )
+        if mask_only_response:
+            return_image, return_mask, return_mask_image = False, True, False
         image_tensors = self._expand_images(image)
         if not image_tensors:
             raise RuntimeError("未提供图片")
@@ -595,6 +638,7 @@ class _RmbgSegmentApiBase:
             "return_image": return_image,
             "return_mask": return_mask,
             "return_mask_image": return_mask_image,
+            "mask_only_response": mask_only_response,
             "extra": extra,
         }
         tasks = []
@@ -619,6 +663,7 @@ class _RmbgSegmentApiBase:
             "return_image": bool(return_image),
             "return_mask": bool(return_mask),
             "return_mask_image": bool(return_mask_image),
+            "mask_only_response": mask_only_response,
             **info_extra,
             "items": [result["info"] for result in results],
         }
