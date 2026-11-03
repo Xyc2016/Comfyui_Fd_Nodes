@@ -11,9 +11,6 @@ from .image_payload import IMAGE_DELIVERY_URL, require_http_image_url, resolve_i
 from .oss_client import upload_bytes_to_oss
 from .url_utils import normalize_oss_url
 
-RMBG_IMAGE_ENCODINGS = ["png", "jpeg_q95"]
-
-
 def tensor_to_jpeg_q95_bytes(image_tensor: torch.Tensor) -> bytes:
     image = tensor_to_rgb_pil(image_tensor)
     buffer = io.BytesIO()

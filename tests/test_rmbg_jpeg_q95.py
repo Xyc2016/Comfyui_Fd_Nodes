@@ -21,7 +21,7 @@ def source_tensor() -> torch.Tensor:
 
 def call_node(node: ZhiYiRMBGNodeV2, image: torch.Tensor, **overrides: object) -> tuple:
     kwargs = {name: spec[1]["default"] for name, spec in node.INPUT_TYPES()["required"].items() if name != "image"}
-    kwargs.update(image=image, env="海外环境", image_encoding="jpeg_q95", health_check=False)
+    kwargs.update(image=image, env="海外环境", health_check=False)
     kwargs.update(overrides)
     return node.remove_background(**kwargs)
 
@@ -85,6 +85,7 @@ def test_url_upload_error_does_not_fall_back_to_base64(monkeypatch) -> None:
 
 @pytest.mark.parametrize("background", ["Alpha", "Color"])
 def test_q95_node_posts_inference_copy_but_composes_original(monkeypatch, background: str) -> None:
+    monkeypatch.setattr(module, "FD_RMBG_REMOTE_OPTIMIZATION", True)
     image = source_tensor()
     original = image.clone()
     node = ZhiYiRMBGNodeV2()
@@ -97,7 +98,7 @@ def test_q95_node_posts_inference_copy_but_composes_original(monkeypatch, backgr
         return "https://oss.example.com/" + path
 
     def post(url: str, payload: dict, timeout: int, label: str) -> dict:
-        assert url == module.FD_OVERSEAS_DWPOSE_URL + "/v1/rmbg"
+        assert url.endswith("/v1/rmbg")
         assert payload["image"].endswith(".jpg")
         assert payload["image_format"] == "png_base64"
         assert (payload["return_image"], payload["return_mask"], payload["return_mask_image"]) == (False, True, False)
@@ -120,6 +121,6 @@ def test_q95_node_posts_inference_copy_but_composes_original(monkeypatch, backgr
     assert json.loads(info)["image_encoding"] == "jpeg_q95"
 
 
-def test_unknown_encoding_fails_before_http() -> None:
-    with pytest.raises(RuntimeError, match="image_encoding"):
-        call_node(ZhiYiRMBGNodeV2(), source_tensor(), image_encoding="jpeg_q100")
+@pytest.mark.parametrize("node_cls", [module.ZhiYiRMBGNode, ZhiYiRMBGNodeV2])
+def test_encoding_is_not_a_node_input(node_cls: type) -> None:
+    assert all("image_encoding" not in fields for fields in node_cls.INPUT_TYPES().values())

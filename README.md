@@ -21,17 +21,17 @@ URL 模式沿用现有 OSS 上传配置：`FD_OSS_BUCKET_NAME`、`FD_OSS_ENDPOIN
 
 若模型服务开启鉴权，分别配置 `FD_SAM2_API_KEY` 和 `FD_DWPOSE_API_KEY`，节点会对推理与健康检查请求附加 `Authorization: Bearer <KEY>`。未配置时不附加鉴权头。
 
-## 海外 RMBG 仅返回 mask
+## 远程 RMBG 环境开关
 
-`ZhiYiRMBGNode` / `ZhiYiRMBGNodeV2` 调用已配置的海外 RMBG 网关时，默认只请求 `return_image=false`、`return_mask=true`、`return_mask_image=false`。国内服务沿用无损 8 位灰度 PNG + Base64 返回 mask；海外用节点保留的原始 RGB 和 mask 合成 Alpha 透明图或 Color 背景换色图，MASK_IMAGE 也在本地生成。INFO 中的三个 return 字段记录实际请求值，`mask_only_response` 标明此路径是否启用。
+ComfyUI 进程环境变量 `FD_RMBG_REMOTE_OPTIMIZATION=1` 同时为 `ZhiYiRMBGNode` / `ZhiYiRMBGNodeV2` 启用 JPEG Q95 推理副本与仅返回 mask。默认关闭；未设置、`0` 或其他值均保留 PNG 输入及节点原返回参数。开关变更后重启 ComfyUI 生效，不添加节点入参，不改工作流 JSON。长期仅在海外开启，国内灰度开发 Comfy 可显式开启供效果试用。
 
-此优化只匹配 `FD_OVERSEAS_GPU_GATEWAY` 下的 `model-api-dwpose/v1/rmbg`，覆盖旧版 service_url 与 V2 海外环境，其他分割服务和国内地址沿用原返回参数。无需修改工作流；回退时设置 `FD_OVERSEAS_RMBG_MASK_ONLY=0` 并重启 ComfyUI。该开关独立于图片输入编码。
+开启后，RMBG 请求固定为 `return_image=false`、`return_mask=true`、`return_mask_image=false`，适用于节点当前选择的国内、海外或自定义 RMBG 地址；不改地址选择，不影响衣物/时尚/身体分割节点。服务沿用无损 8 位灰度 PNG + Base64 返回 mask；客户端用节点保留的原始 RGB 和 mask 合成 Alpha 透明图或 Color 背景换色图，MASK_IMAGE 也在本地生成。INFO 与日志记录 `image_encoding`、`mask_only_response` 及实际返回开关。关闭 `FD_RMBG_REMOTE_OPTIMIZATION` 即可整体回退。
 
 仅 mask 模式要求返回 `image_size` 与原图一致，灰度 PNG 的实际尺寸与 `output_size` 一致，且输出尺寸属于原图尺寸或声明的 `inference_size`。推理尺寸的 mask 按现有 BILINEAR 规则恢复原尺寸；缺失、损坏、错误尺寸、非灰度 PNG 或服务仍返回成图均明确报错，不用空 mask 或成图兜底。该方式保持当前节点使用原图合成的语义，不新增前景颜色细化。
 
-`ZhiYiRMBGNodeV2` 末尾新增可选 `image_encoding`：缺省 `png` 保持旧工作流；选择 `jpeg_q95` 时，仅将推理副本编码为原尺寸 RGB JPEG（quality=95、4:2:0、optimize=true、非 progressive）。原始文件无论 PNG 或 JPEG 都统一按此参数重编码；成图仍使用压缩前 tensor 与无损 PNG mask 合成，不把 JPEG RGB 用于最终输出。`image_delivery=url` 上传内容 MD5 命名的 `.jpg`，base64 模式使用 `data:image/jpeg;base64,`；INFO 记录选择的编码。服务端 `image_format=png_base64` 是响应格式，保持不变。
+开启优化时，仅将推理副本编码为原尺寸 RGB JPEG（quality=95、4:2:0、optimize=true、非 progressive）。原始文件无论 PNG 或 JPEG 都统一按此参数重编码；成图仍使用压缩前 tensor 与无损 PNG mask 合成，不把 JPEG RGB 用于最终输出。`image_delivery=url` 上传内容 MD5 命名的 `.jpg`，base64 模式使用 `data:image/jpeg;base64,`。服务端 `image_format=png_base64` 是响应格式，保持不变。
 
-款式上身试点仅将 #312 切为远程 V2 + `jpeg_q95`；#313 ClothesSegment 保持本地。输入编码回退为 `png` 即可，毋须关闭仅 mask 响应。V1 继续使用 PNG，海外仅 mask 优化仍覆盖 V1/V2。旧插件不支持新参数，需安装包含此改动的版本并重启后再启用试点。
+该环境开关不替换工作流中的本地 RMBG 或 ClothesSegment；同事可导入使用远程 RMBG V1/V2 的工作流试用。款式上身 #313 继续保留本地。JPEG 有损压缩可能改变分割边界和背景残留，需要人工效果确认。
 
 > [!NOTE]
 > This projected was created with a [cookiecutter](https://github.com/Comfy-Org/cookiecutter-comfy-extension) template. It helps you start writing custom nodes without worrying about the Python setup.

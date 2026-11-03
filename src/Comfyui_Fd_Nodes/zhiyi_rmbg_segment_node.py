@@ -19,7 +19,6 @@ from .config import (
     FD_CLOTHES_SEGMENT_URL,
     FD_DWPOSE_API_KEY,
     FD_FASHION_SEGMENT_URL,
-    FD_OVERSEAS_DWPOSE_URL,
     FD_RMBG_URL,
     RMBG_SERVICE_URL_PRESETS,
 )
@@ -32,7 +31,7 @@ from .utils.image_payload import (
     tensor_to_image_payload,
 )
 from .utils.logging_utils import configure_default_logging
-from .utils.rmbg_image_payload import RMBG_IMAGE_ENCODINGS, tensor_to_jpeg_q95_payload
+from .utils.rmbg_image_payload import tensor_to_jpeg_q95_payload
 from .utils.service_url import resolve_service_url_preset, service_url_preset_options
 
 configure_default_logging()
@@ -44,7 +43,7 @@ DEFAULT_CLOTHES_SEGMENT_URL = "http://10.1.0.230:8003/v1/segment/clothes"
 DEFAULT_FASHION_SEGMENT_URL = "http://10.1.0.230:8003/v1/segment/fashion"
 DEFAULT_BODY_SEGMENT_URL = "http://10.1.0.230:8003/v1/segment/body"
 BACKGROUND_MODES = ["Alpha", "Color"]
-FD_OVERSEAS_RMBG_MASK_ONLY = os.getenv("FD_OVERSEAS_RMBG_MASK_ONLY", "1") == "1"
+FD_RMBG_REMOTE_OPTIMIZATION = os.getenv("FD_RMBG_REMOTE_OPTIMIZATION") == "1"
 
 
 def _response_size(result: dict, field: str) -> tuple[int, int]:
@@ -603,10 +602,7 @@ class _RmbgSegmentApiBase:
         extra,
         info_extra,
         image_delivery=IMAGE_DELIVERY_BASE64,
-        image_encoding: str = "png",
     ):
-        if image_encoding not in RMBG_IMAGE_ENCODINGS or (endpoint != "rmbg" and image_encoding != "png"):
-            raise RuntimeError(f"不支持的 RMBG image_encoding: {image_encoding}")
         if node_switch == 1:
             image_batch = self._normalize_image_batch(image)
             mask = torch.zeros((image_batch.shape[0], image_batch.shape[1], image_batch.shape[2]), dtype=torch.float32)
@@ -623,11 +619,8 @@ class _RmbgSegmentApiBase:
             RMBG_SERVICE_URL_PRESETS,
         )
         final_service_url = _normalize_rmbg_segment_url(selected_service_url, default_url, endpoint)
-        mask_only_response = (
-            FD_OVERSEAS_RMBG_MASK_ONLY
-            and endpoint == "rmbg"
-            and final_service_url == f"{FD_OVERSEAS_DWPOSE_URL}/v1/rmbg"
-        )
+        mask_only_response = FD_RMBG_REMOTE_OPTIMIZATION and endpoint == "rmbg"
+        image_encoding = "jpeg_q95" if mask_only_response else "png"
         if mask_only_response:
             return_image, return_mask, return_mask_image = False, True, False
         image_tensors = self._expand_images(image)
@@ -658,7 +651,8 @@ class _RmbgSegmentApiBase:
                 (idx, image_tensor, final_service_url, payload_params, timeout, image_delivery),
             ))
 
-        print(f"[{label}] 处理 {len(tasks)} 张图片，并发上限 {max_concurrency}")
+        print(f"[{label}] 处理 {len(tasks)} 张图片，并发上限 {max_concurrency}, "
+              f"image_encoding={image_encoding}, mask_only_response={mask_only_response}")
         results = self._run_concurrent(tasks, max_concurrency, label)
         info = {
             "service_url": final_service_url,

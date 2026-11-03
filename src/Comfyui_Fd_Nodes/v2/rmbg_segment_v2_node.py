@@ -13,7 +13,6 @@ from ..utils.image_payload import (
     IMAGE_DELIVERY_OPTIONS,
     image_delivery_input_config,
 )
-from ..utils.rmbg_image_payload import RMBG_IMAGE_ENCODINGS
 from ..zhiyi_rmbg_segment_node import (
     BACKGROUND_MODES,
     BODY_CLASSES,
@@ -59,10 +58,6 @@ class ZhiYiRMBGNodeV2(_RmbgSegmentApiBase):
                 "health_check": ("BOOLEAN", {"default": False}),
                 "node_switch": ("INT", {"default": 0, "min": 0, "max": 1, "step": 1}),
                 "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
-                "image_encoding": (RMBG_IMAGE_ENCODINGS, {
-                    "default": "png",
-                    "tooltip": "RMBG 推理副本编码；JPEG Q95 保留尺寸，成图仍使用压缩前原图与返回 mask 合成",
-                }),
             },
         }
 
@@ -93,7 +88,6 @@ class ZhiYiRMBGNodeV2(_RmbgSegmentApiBase):
         health_check=False,
         node_switch=0,
         image_delivery=IMAGE_DELIVERY_BASE64,
-        image_encoding: str = "png",
     ):
         resolved_base = resolve_service_env(env, RMBG_SERVICE_ENVS)
         return self._execute(
@@ -118,7 +112,6 @@ class ZhiYiRMBGNodeV2(_RmbgSegmentApiBase):
             node_switch=node_switch,
             service_url_preset=CUSTOM_SERVICE_URL_PRESET,
             image_delivery=image_delivery,
-            image_encoding=image_encoding,
             extra={"sensitivity": float(sensitivity), "refine_foreground": bool(refine_foreground)},
             info_extra={"sensitivity": float(sensitivity), "refine_foreground": bool(refine_foreground)},
         )
