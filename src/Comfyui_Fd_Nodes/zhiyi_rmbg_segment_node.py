@@ -32,6 +32,7 @@ from .utils.image_payload import (
     tensor_to_image_payload,
 )
 from .utils.logging_utils import configure_default_logging
+from .utils.rmbg_image_payload import RMBG_IMAGE_ENCODINGS, tensor_to_jpeg_q95_payload
 from .utils.service_url import resolve_service_url_preset, service_url_preset_options
 
 configure_default_logging()
@@ -501,8 +502,13 @@ class _RmbgSegmentApiBase:
         self, idx, image_tensor, service_url, payload_params, timeout, image_delivery=IMAGE_DELIVERY_BASE64
     ):
         original_image = self._image_tensor_to_rgb_pil(image_tensor)
+        image_payload = (
+            tensor_to_jpeg_q95_payload(image_tensor, image_delivery)
+            if payload_params["image_encoding"] == "jpeg_q95"
+            else tensor_to_image_payload(image_tensor, image_delivery)
+        )
         payload = self._build_common_payload(
-            tensor_to_image_payload(image_tensor, image_delivery),
+            image_payload,
             payload_params["process_res"],
             payload_params["mask_blur"],
             payload_params["mask_offset"],
@@ -597,7 +603,10 @@ class _RmbgSegmentApiBase:
         extra,
         info_extra,
         image_delivery=IMAGE_DELIVERY_BASE64,
+        image_encoding: str = "png",
     ):
+        if image_encoding not in RMBG_IMAGE_ENCODINGS or (endpoint != "rmbg" and image_encoding != "png"):
+            raise RuntimeError(f"不支持的 RMBG image_encoding: {image_encoding}")
         if node_switch == 1:
             image_batch = self._normalize_image_batch(image)
             mask = torch.zeros((image_batch.shape[0], image_batch.shape[1], image_batch.shape[2]), dtype=torch.float32)
@@ -639,6 +648,7 @@ class _RmbgSegmentApiBase:
             "return_mask": return_mask,
             "return_mask_image": return_mask_image,
             "mask_only_response": mask_only_response,
+            "image_encoding": image_encoding,
             "extra": extra,
         }
         tasks = []
@@ -654,6 +664,7 @@ class _RmbgSegmentApiBase:
             "service_url": final_service_url,
             "endpoint": f"/v1/{endpoint}",
             "image_delivery": image_delivery,
+            "image_encoding": image_encoding,
             "process_res": int(process_res),
             "mask_blur": int(mask_blur),
             "mask_offset": int(mask_offset),

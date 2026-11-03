@@ -545,7 +545,8 @@ def test_image_delivery_appended_and_default_preserves_signature(node_cls, endpo
     old_optional = ["health_check", "node_switch"]
     if not is_v2:
         old_optional.append("service_url_preset")
-    assert list(inputs["optional"]) == old_optional + ["image_delivery"]
+    encoding_optional = ["image_encoding"] if node_cls is ZhiYiRMBGNodeV2 else []
+    assert list(inputs["optional"]) == old_optional + ["image_delivery"] + encoding_optional
     options, config = inputs["optional"]["image_delivery"]
     assert options == ["base64", "url"]
     assert config == image_payload.image_delivery_input_config()
@@ -646,7 +647,7 @@ def test_legacy_positional_call_uses_base64_without_upload(monkeypatch, node_cls
     kwargs = _delivery_node_kwargs(node, image=image)
     inputs = node.INPUT_TYPES()
     positional = [kwargs[name] for name in inputs["required"]]
-    positional.extend(spec[1]["default"] for name, spec in inputs["optional"].items() if name != "image_delivery")
+    positional.extend(spec[1]["default"] for name, spec in inputs["optional"].items() if name not in {"image_delivery", "image_encoding"})
     _, _, _, info_text = getattr(node, node.FUNCTION)(*positional)
     assert calls == [("POST", f"https://example.com/api/v1/{endpoint}")]
     assert json.loads(info_text)["image_delivery"] == "base64"

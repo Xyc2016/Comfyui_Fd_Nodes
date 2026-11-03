@@ -25,9 +25,13 @@ URL 模式沿用现有 OSS 上传配置：`FD_OSS_BUCKET_NAME`、`FD_OSS_ENDPOIN
 
 `ZhiYiRMBGNode` / `ZhiYiRMBGNodeV2` 调用已配置的海外 RMBG 网关时，默认只请求 `return_image=false`、`return_mask=true`、`return_mask_image=false`。国内服务沿用无损 8 位灰度 PNG + Base64 返回 mask；海外用节点保留的原始 RGB 和 mask 合成 Alpha 透明图或 Color 背景换色图，MASK_IMAGE 也在本地生成。INFO 中的三个 return 字段记录实际请求值，`mask_only_response` 标明此路径是否启用。
 
-此优化只匹配 `FD_OVERSEAS_GPU_GATEWAY` 下的 `model-api-dwpose/v1/rmbg`，覆盖旧版 service_url 与 V2 海外环境，其他分割服务和国内地址沿用原返回参数。无需修改工作流；回退时设置 `FD_OVERSEAS_RMBG_MASK_ONLY=0` 并重启 ComfyUI。该开关独立于图片输入编码，本次继续传原尺寸 PNG。
+此优化只匹配 `FD_OVERSEAS_GPU_GATEWAY` 下的 `model-api-dwpose/v1/rmbg`，覆盖旧版 service_url 与 V2 海外环境，其他分割服务和国内地址沿用原返回参数。无需修改工作流；回退时设置 `FD_OVERSEAS_RMBG_MASK_ONLY=0` 并重启 ComfyUI。该开关独立于图片输入编码。
 
 仅 mask 模式要求返回 `image_size` 与原图一致，灰度 PNG 的实际尺寸与 `output_size` 一致，且输出尺寸属于原图尺寸或声明的 `inference_size`。推理尺寸的 mask 按现有 BILINEAR 规则恢复原尺寸；缺失、损坏、错误尺寸、非灰度 PNG 或服务仍返回成图均明确报错，不用空 mask 或成图兜底。该方式保持当前节点使用原图合成的语义，不新增前景颜色细化。
+
+`ZhiYiRMBGNodeV2` 末尾新增可选 `image_encoding`：缺省 `png` 保持旧工作流；选择 `jpeg_q95` 时，仅将推理副本编码为原尺寸 RGB JPEG（quality=95、4:2:0、optimize=true、非 progressive）。原始文件无论 PNG 或 JPEG 都统一按此参数重编码；成图仍使用压缩前 tensor 与无损 PNG mask 合成，不把 JPEG RGB 用于最终输出。`image_delivery=url` 上传内容 MD5 命名的 `.jpg`，base64 模式使用 `data:image/jpeg;base64,`；INFO 记录选择的编码。服务端 `image_format=png_base64` 是响应格式，保持不变。
+
+款式上身试点仅将 #312 切为远程 V2 + `jpeg_q95`；#313 ClothesSegment 保持本地。输入编码回退为 `png` 即可，毋须关闭仅 mask 响应。V1 继续使用 PNG，海外仅 mask 优化仍覆盖 V1/V2。旧插件不支持新参数，需安装包含此改动的版本并重启后再启用试点。
 
 > [!NOTE]
 > This projected was created with a [cookiecutter](https://github.com/Comfy-Org/cookiecutter-comfy-extension) template. It helps you start writing custom nodes without worrying about the Python setup.
