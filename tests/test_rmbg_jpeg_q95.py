@@ -112,8 +112,10 @@ def test_q95_node_posts_inference_copy_but_composes_original(monkeypatch, backgr
     assert captured[0] == encoding.tensor_to_jpeg_q95_bytes(image)
     assert torch.equal(image, original)
     if background == "Alpha":
-        assert torch.equal(output[..., :3], image[..., :3])
-        assert torch.equal(output[..., 3], mask)
+        pixels = (image[..., :3].numpy() * 255).astype(np.uint8).astype(np.uint32)
+        expected = ((pixels * 128 + 127) // 255).astype(np.float32) / 255
+        assert output.shape == image[..., :3].shape
+        assert torch.equal(output, torch.from_numpy(expected))
     else:
         rgb = torch.from_numpy((image[..., :3].numpy() * 255).astype(np.uint8).astype(np.float32) / 255)
         assert torch.allclose(output, rgb * mask.unsqueeze(-1) + (1 - mask.unsqueeze(-1)), atol=1e-7, rtol=0)

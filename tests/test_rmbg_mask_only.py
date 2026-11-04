@@ -67,17 +67,45 @@ def test_overseas_returns_only_mask_and_composes_original(monkeypatch, node_cls:
     assert torch.equal(mask, alpha)
     assert torch.equal(preview, alpha.unsqueeze(-1).expand(-1, -1, -1, 3))
     if background == "Alpha":
-        assert output.shape == (1, 3, 5, 4)
-        assert torch.equal(output[..., 3], alpha)
-        assert torch.equal(output[..., :3], image * (alpha.unsqueeze(-1) > 0))
-        # Soft edge RGB stays straight alpha; it must not be multiplied twice.
-        assert torch.equal(output[0, 0, 1, :3], image[0, 0, 1])
+        assert output.shape == (1, 3, 5, 3)
+        # Legacy IMAGE converts the returned RGBA PNG to RGB over black.
+        pixels = np.arange(45, dtype=np.uint8).reshape(3, 5, 3)
+        weights = np.linspace(0, 255, 15, dtype=np.uint8).reshape(3, 5, 1)
+        expected = (pixels.astype(np.uint32) * weights + 127) // 255
+        assert torch.equal(output, torch.from_numpy(expected.astype(np.float32) / 255).unsqueeze(0))
+        assert not torch.equal(output[0, 0, 1], image[0, 0, 1])
     else:
         color = torch.tensor([18, 52, 86], dtype=torch.float32) / 255
         assert torch.equal(output, image * alpha.unsqueeze(-1) + color * (1 - alpha.unsqueeze(-1)))
     info = json.loads(info_text)
     assert info["mask_only_response"] is True
     assert (info["return_image"], info["return_mask"], info["return_mask_image"]) == (False, True, False)
+
+
+@pytest.mark.parametrize("node_cls", [module.ZhiYiRMBGNode, ZhiYiRMBGNodeV2])
+@pytest.mark.parametrize("image_encoding", ["png", "jpeg_q95"])
+def test_alpha_mask_only_matches_legacy_returned_rgba_png(monkeypatch, node_cls: type, image_encoding: str) -> None:
+    """All 256 alpha levels must reproduce the old image decoder, including soft edges."""
+    node = node_cls()
+    pixels = np.random.default_rng(42).integers(0, 256, (16, 16, 3), dtype=np.uint8)
+    image = torch.from_numpy(pixels.astype(np.float32) / 255).unsqueeze(0)
+    response = mask_response(size=(16, 16), source_size=(16, 16))
+    monkeypatch.setattr(node, "_post_process", lambda *args: response)
+    monkeypatch.setattr(module, "tensor_to_jpeg_q95_payload", lambda *args: "data:image/jpeg;base64,input")
+    output, mask, _, _ = call_node(node, image, background="Alpha", image_encoding=image_encoding)
+
+    # Frozen legacy behavior: read the server RGBA image, then composite onto black.
+    returned = Image.fromarray(pixels).convert("RGBA")
+    returned.putalpha(Image.fromarray(np.arange(256, dtype=np.uint8).reshape(16, 16)))
+    legacy = node._pil_to_image_tensor(node._decode_png_data_url(_png_data_url(returned), "processed_image"))
+    assert torch.equal(output, legacy)
+    assert torch.equal(mask, torch.arange(256, dtype=torch.float32).reshape(1, 16, 16) / 255)
+
+
+def _png_data_url(image: Image.Image) -> str:
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
 def test_other_segment_nodes_keep_original_return_flags(monkeypatch) -> None:

@@ -549,6 +549,12 @@ class _RmbgSegmentApiBase:
             mode = "RGBA" if payload_params["background"] == "Alpha" else "RGB"
             pixels = np.asarray(processed_image.convert(mode), dtype=np.float32) / 255.0
             result_image = torch.from_numpy(pixels.copy()).unsqueeze(0)
+        elif payload_params["mask_only_response"] and payload_params["background"] == "Alpha":
+            # Match the legacy returned-PNG conversion, including 8-bit alpha rounding.
+            rgba = original_image.convert("RGBA")
+            alpha = np.rint(mask[0].detach().cpu().numpy() * 255.0).clip(0, 255).astype(np.uint8)
+            rgba.putalpha(Image.fromarray(alpha))
+            result_image = self._pil_to_image_tensor(rgba)
         elif result.get("mask"):
             result_image = self._compose_output_image(
                 image_tensor,
