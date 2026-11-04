@@ -31,6 +31,11 @@ from src.Comfyui_Fd_Nodes.zhiyi_rmbg_segment_node import (
 )
 
 
+@pytest.fixture(autouse=True)
+def rmbg_deployment_url(monkeypatch):
+    monkeypatch.setattr(rmbg_module, "RMBG_RUNTIME_URL", "https://example.com/api/v1/rmbg")
+
+
 def _image_data_url(size=(2, 2), color=(0, 255, 0), mode="RGB"):
     image = Image.new(mode, size, color)
     buffer = io.BytesIO()
@@ -101,11 +106,11 @@ def test_rmbg_and_segment_node_metadata():
     fashion_inputs = ZhiYiFashionSegmentNode.INPUT_TYPES()
     body_inputs = ZhiYiBodySegmentNode.INPUT_TYPES()
 
-    assert rmbg_inputs["required"]["service_url"][1]["default"].endswith("/v1/rmbg")
+    assert "service_url" not in rmbg_inputs["required"]
     assert rmbg_inputs["required"]["process_res"][1]["default"] == 1024
     assert rmbg_inputs["required"]["sensitivity"][1]["default"] == 1.0
     assert rmbg_inputs["required"]["refine_foreground"][1]["default"] is False
-    assert rmbg_inputs["required"]["return_mask_image"][1]["default"] is False
+    assert not {"return_image", "return_mask", "return_mask_image"} & rmbg_inputs["required"].keys()
     assert clothes_inputs["required"]["service_url"][1]["default"].endswith("/v1/segment/clothes")
     assert fashion_inputs["required"]["service_url"][1]["default"].endswith("/v1/segment/fashion")
     assert body_inputs["required"]["service_url"][1]["default"].endswith("/v1/segment/body")
@@ -141,6 +146,8 @@ def test_rmbg_and_segment_node_metadata():
         assert node_cls.RETURN_TYPES == ("IMAGE", "MASK", "IMAGE", "JSON")
         assert node_cls.RETURN_NAMES == ("IMAGE", "MASK", "MASK_IMAGE", "INFO")
         input_types = node_cls.INPUT_TYPES()
+        if node_cls is ZhiYiRMBGNode:
+            continue
         assert list(input_types["optional"])[2:4] == ["service_url_preset", "image_delivery"]
         preset_options, preset_config = input_types["optional"]["service_url_preset"]
         assert preset_options == [CUSTOM_SERVICE_URL_PRESET, "10.1.0.230"]
@@ -257,6 +264,7 @@ def test_parse_classes_preserves_fashion_comma_names():
 
 
 def test_rmbg_posts_full_payload_and_decodes_outputs(monkeypatch):
+    monkeypatch.setattr(rmbg_module, "RMBG_RUNTIME_URL", "http://example.com:8003/v1/rmbg")
     node = ZhiYiRMBGNode()
     images = torch.zeros((1, 2, 2, 3), dtype=torch.float32)
     calls = []
@@ -276,7 +284,7 @@ def test_rmbg_posts_full_payload_and_decodes_outputs(monkeypatch):
         assert payload["refine_foreground"] is True
         assert payload["background"] == "Color"
         assert payload["background_color"] == "#ffffff"
-        assert payload["return_image"] is False
+        assert payload["return_image"] is True
         assert payload["return_mask"] is True
         assert payload["return_mask_image"] is False
         assert payload["image_format"] == "png_base64"
@@ -284,7 +292,7 @@ def test_rmbg_posts_full_payload_and_decodes_outputs(monkeypatch):
             request_id="rmbg-1",
             classes=[],
             preprocessor="RMBGPreprocessor",
-            processed_image=None,
+            processed_image=_image_data_url(color=(0, 255, 0)),
             mask_image=None,
         )
         data["model_name"] = "RMBG-2.0"
@@ -319,8 +327,8 @@ def test_rmbg_posts_full_payload_and_decodes_outputs(monkeypatch):
     assert result_image.shape == (1, 2, 2, 3)
     assert mask.shape == (1, 2, 2)
     assert mask_image.shape == (1, 2, 2, 3)
-    # Compose output and grayscale preview locally from the returned mask.
-    assert torch.equal(result_image[0, 0, 0], torch.tensor([0.0, 0.0, 0.0]))
+    # Preserve the refined server RGB; only the preview is generated locally.
+    assert torch.equal(result_image[0, 0, 0], torch.tensor([0.0, 1.0, 0.0]))
     assert torch.equal(mask, torch.tensor([[[1.0, 0.0], [0.0, 1.0]]]))
     assert torch.equal(mask_image[0, 0, 0], torch.tensor([1.0, 1.0, 1.0]))
     assert info["service_url"] == "http://example.com:8003/v1/rmbg"
@@ -543,7 +551,7 @@ def test_image_delivery_appended_and_default_preserves_signature(node_cls, endpo
     inputs = node_cls.INPUT_TYPES()
     is_v2 = "env" in inputs["required"]
     old_optional = ["health_check", "node_switch"]
-    if not is_v2:
+    if not is_v2 and endpoint != "rmbg":
         old_optional.append("service_url_preset")
     assert list(inputs["optional"]) == old_optional + ["image_delivery"] + (["image_encoding"] if endpoint == "rmbg" else [])
     options, config = inputs["optional"]["image_delivery"]
@@ -551,7 +559,7 @@ def test_image_delivery_appended_and_default_preserves_signature(node_cls, endpo
     assert config == image_payload.image_delivery_input_config()
     method = getattr(node_cls, node_cls.FUNCTION)
     parameters = inspect.signature(method).parameters
-    assert list(parameters) == ["self", *inputs["required"], *inputs["optional"]]
+    assert list(parameters) == ["self", *inputs["required"], *inputs["optional"], *(["legacy_inputs"] if endpoint == "rmbg" else [])]
     assert parameters["image_delivery"].default == "base64"
 
 

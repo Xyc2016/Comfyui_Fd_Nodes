@@ -5,7 +5,6 @@ from ..config import (
     FD_BODY_SEGMENT_URL,
     FD_CLOTHES_SEGMENT_URL,
     FD_FASHION_SEGMENT_URL,
-    FD_RMBG_URL,
     RMBG_SERVICE_ENVS,
 )
 from ..utils.image_payload import (
@@ -18,108 +17,14 @@ from ..zhiyi_rmbg_segment_node import (
     BODY_CLASSES,
     CLOTHES_CLASSES,
     FASHION_CLASSES,
-    RMBG_IMAGE_ENCODINGS,
-    RMBG_IMAGE_ENCODING_CONFIG,
+    ZhiYiRMBGNode,
     _RmbgSegmentApiBase,
 )
 from .env import resolve_service_env, service_env_options
 
 
-class ZhiYiRMBGNodeV2(_RmbgSegmentApiBase):
-    """知衣 RMBG 2.0 背景去除节点 V2 - 支持灰度/开发/海外环境一键切换。"""
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "image": ("IMAGE",),
-                "env": (service_env_options(), {
-                    "default": "开发环境",
-                    "tooltip": "灰度/开发/海外环境使用内置地址（忽略 service_url 与 FD_* 环境变量）；自定义使用 service_url",
-                }),
-                "service_url": ("STRING", {
-                    "default": FD_RMBG_URL or "http://10.1.0.230:8003/v1/rmbg",
-                    "multiline": False,
-                    "tooltip": "RMBG 2.0 背景去除接口地址，例如 http://host:8003/v1/rmbg；仅环境=自定义时使用",
-                }),
-                "process_res": ("INT", {"default": 1024, "min": 256, "max": 2048, "step": 64}),
-                "sensitivity": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05}),
-                "mask_blur": ("INT", {"default": 0, "min": 0, "max": 64, "step": 1}),
-                "mask_offset": ("INT", {"default": 0, "min": -64, "max": 64, "step": 1}),
-                "invert_output": ("BOOLEAN", {"default": False}),
-                "refine_foreground": ("BOOLEAN", {"default": False}),
-                "background": (BACKGROUND_MODES, {"default": "Alpha"}),
-                "background_color": ("STRING", {"default": "#222222"}),
-                "return_image": ("BOOLEAN", {"default": True}),
-                "return_mask": ("BOOLEAN", {"default": True}),
-                "return_mask_image": ("BOOLEAN", {"default": False}),
-                "max_concurrency": ("INT", {"default": 1, "min": 1, "max": 16, "step": 1}),
-                "timeout": ("INT", {"default": 180, "min": 10, "max": 1200, "step": 10}),
-            },
-            "optional": {
-                "health_check": ("BOOLEAN", {"default": False}),
-                "node_switch": ("INT", {"default": 0, "min": 0, "max": 1, "step": 1}),
-                "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
-                "image_encoding": (RMBG_IMAGE_ENCODINGS, RMBG_IMAGE_ENCODING_CONFIG),
-            },
-        }
-
-    RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "JSON")
-    RETURN_NAMES = ("IMAGE", "MASK", "MASK_IMAGE", "INFO")
-    FUNCTION = "remove_background"
-    CATEGORY = "知衣/抠图"
-    OUTPUT_NODE = False
-
-    def remove_background(
-        self,
-        image,
-        env,
-        service_url,
-        process_res,
-        sensitivity,
-        mask_blur,
-        mask_offset,
-        invert_output,
-        refine_foreground,
-        background,
-        background_color,
-        return_image,
-        return_mask,
-        return_mask_image,
-        max_concurrency,
-        timeout,
-        health_check=False,
-        node_switch=0,
-        image_delivery=IMAGE_DELIVERY_BASE64,
-        image_encoding: str = "png",
-    ):
-        resolved_base = resolve_service_env(env, RMBG_SERVICE_ENVS)
-        return self._execute(
-            image=image,
-            service_url=resolved_base or service_url,
-            endpoint="rmbg",
-            default_url=FD_RMBG_URL or "http://10.1.0.230:8003/v1/rmbg",
-            health_key="rmbg",
-            label="知衣RMBG2.0背景去除",
-            process_res=process_res,
-            mask_blur=mask_blur,
-            mask_offset=mask_offset,
-            invert_output=invert_output,
-            background=background,
-            background_color=background_color,
-            return_image=return_image,
-            return_mask=return_mask,
-            return_mask_image=return_mask_image,
-            max_concurrency=max_concurrency,
-            timeout=timeout,
-            health_check=health_check,
-            node_switch=node_switch,
-            service_url_preset=CUSTOM_SERVICE_URL_PRESET,
-            image_delivery=image_delivery,
-            image_encoding=image_encoding,
-            extra={"sensitivity": float(sensitivity), "refine_foreground": bool(refine_foreground)},
-            info_extra={"sensitivity": float(sensitivity), "refine_foreground": bool(refine_foreground)},
-        )
+class ZhiYiRMBGNodeV2(ZhiYiRMBGNode):
+    """RMBG V2 shares the deployment-controlled RMBG contract with V1."""
 
 
 class ZhiYiClothesSegmentNodeV2(_RmbgSegmentApiBase):

@@ -21,20 +21,25 @@ URL 模式沿用现有 OSS 上传配置：`FD_OSS_BUCKET_NAME`、`FD_OSS_ENDPOIN
 
 若模型服务开启鉴权，分别配置 `FD_SAM2_API_KEY` 和 `FD_DWPOSE_API_KEY`，节点会对推理与健康检查请求附加 `Authorization: Bearer <KEY>`。未配置时不附加鉴权头。
 
-## 远程 RMBG 传输质量（单选）
+## 远程 RMBG 部署环境与传输
 
-`ZhiYiRMBGNode` / `ZhiYiRMBGNodeV2` 在末尾提供可选单选项 `image_encoding`：
+`ZhiYiRMBGNode` / `ZhiYiRMBGNodeV2` 使用 Comfy 进程环境变量路由，不再提供 `env`、`service_url`、`service_url_preset` 或三个 `return_*` 节点输入。旧 API JSON 中残留的这些字段会被忽略；不会覆盖部署配置。
 
-- `png`（默认）：无损 PNG 推理输入；旧工作流缺少该字段时仍使用 PNG。
-- `jpeg_q95`：原尺寸 RGB JPEG 推理副本，quality=95、4:2:0、optimize=true、非 progressive。原输入无论 PNG 或 JPEG 都统一重编码为 Q95。
+| `FD_COMFY_RUNTIME_ENV` | 默认服务 | `image_encoding` 缺省值 |
+|---|---|---|
+| `dev`（未设置时） | `http://10.1.0.230:8003/v1/rmbg` | `png` |
+| `domestic` | `http://model-api-dwpose-svc.online-server-gray:8001/v1/rmbg` | `png` |
+| `overseas` | `FD_OVERSEAS_GPU_GATEWAY` 下的 `/model-api-dwpose/v1/rmbg` | `jpeg_q95` |
 
-质量选择与 `env` / `service_url` / `image_delivery` 独立。两种质量均仅请求无损 8 位灰度 PNG mask（`return_image=false`、`return_mask=true`、`return_mask_image=false`），客户端用压缩前原始 RGB 与 mask 合成 Alpha 透明图或 Color 背景换色图，并本地生成 MASK_IMAGE。保留旧 return 入参以兼容 JSON，RMBG 请求固定使用上述实际返回开关；衣物/时尚/身体分割仍沿用原返回参数，不新增质量选项。
+部署可用 `FD_RMBG_URL` 覆盖服务地址（包括生产依赖地址）；非法运行环境在加载配置时明确失败。修改部署变量需重启进程。国内集群与 102 保持无损 PNG，海外默认 JPEG Q95；节点末尾仍可用 `image_encoding=png/jpeg_q95` 手动指定，已保存的显式选择优先于缺省值。Q95 使用原尺寸 RGB、quality=95、4:2:0、optimize=true、非 progressive；有损压缩可能改变 mask 边界和背景残留。
 
-不再读取 `FD_RMBG_REMOTE_OPTIMIZATION` 或 `FD_OVERSEAS_RMBG_MASK_ONLY`。刷新界面后即可在节点选择质量；无需通过环境变量切换或重启进程。INFO 和正式调用日志记录 `image_encoding`、`mask_only_response`，可直接确认 Q95 是否生效。
+- `refine_foreground=false`：只请求无损 8 位灰度 PNG mask，用压缩前原始 RGB 本地合成 Alpha/Color 输出。
+- `refine_foreground=true`：请求精修图片和 mask，使用服务端精修后的像素；Alpha 保留 RGBA，不用原图覆盖精修结果。服务端漏返图片时明确失败。
+- MASK_IMAGE 始终本地从 mask 生成，不传输重复预览。
 
-仅 mask 响应要求 `image_size` 与原图一致，灰度 PNG 的实际尺寸与 `output_size` 一致，且输出尺寸属于原图尺寸或声明的 `inference_size`。推理尺寸的 mask 按现有 BILINEAR 规则恢复原尺寸；缺失、损坏、错误尺寸、非灰度 PNG 或服务仍返回成图均明确报错。
+仅 mask 响应校验声明尺寸、原图尺寸、8 位灰度 PNG 编码与返回字段；推理尺寸 mask 按 BILINEAR 恢复原尺寸，异常明确失败。INFO 和调用日志记录编码、返回模式及实际服务地址，INFO 额外记录运行环境。
 
-选择 Q95 时，`image_delivery=url` 上传内容 MD5 命名的 `.jpg`，base64 模式使用 `data:image/jpeg;base64,`。服务端 `image_format=png_base64` 是响应格式，保持不变。JPEG 有损压缩可能改变分割边界和背景残留，可选择 PNG 比较效果。该选项不自动替换工作流中的本地 RMBG 或 ClothesSegment，款式上身 #313 保持现状。
+保留 `image_delivery=base64/url` 及既有海外 URL 传输约束；Q95 URL 上传 `.jpg`，Base64 使用 `data:image/jpeg;base64,`，服务端响应仍为 PNG。不再读取旧 `FD_RMBG_REMOTE_OPTIMIZATION` / `FD_OVERSEAS_RMBG_MASK_ONLY`。衣物/时尚/身体分割及本地 RMBG 不受本次契约调整影响。
 
 > [!NOTE]
 > This projected was created with a [cookiecutter](https://github.com/Comfy-Org/cookiecutter-comfy-extension) template. It helps you start writing custom nodes without worrying about the Python setup.

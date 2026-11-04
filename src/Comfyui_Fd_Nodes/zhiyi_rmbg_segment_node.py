@@ -18,7 +18,9 @@ from .config import (
     FD_CLOTHES_SEGMENT_URL,
     FD_DWPOSE_API_KEY,
     FD_FASHION_SEGMENT_URL,
-    FD_RMBG_URL,
+    FD_COMFY_RUNTIME_ENV,
+    RMBG_DEFAULT_IMAGE_ENCODING,
+    RMBG_RUNTIME_URL,
     RMBG_SERVICE_URL_PRESETS,
 )
 from .utils.error_utils import ERROR_TIMEOUT, normalize_error_message
@@ -44,8 +46,8 @@ DEFAULT_BODY_SEGMENT_URL = "http://10.1.0.230:8003/v1/segment/body"
 BACKGROUND_MODES = ["Alpha", "Color"]
 RMBG_IMAGE_ENCODINGS = ["png", "jpeg_q95"]
 RMBG_IMAGE_ENCODING_CONFIG = {
-    "default": "png",
-    "tooltip": "传输质量（单选）：png 无损；jpeg_q95 使用 JPEG Q95 推理副本节省流量，成图仍用原始 RGB。",
+    "default": RMBG_DEFAULT_IMAGE_ENCODING,
+    "tooltip": "传输质量：png 无损；jpeg_q95 节省流量。未精修时用原始 RGB 合成，精修时保留远端图片。",
 }
 
 
@@ -530,6 +532,8 @@ class _RmbgSegmentApiBase:
         )
         result = self._post_process(service_url, payload, timeout, label)
 
+        if payload_params["is_rmbg"] and not result.get("mask"):
+            raise RuntimeError("RMBG 响应缺少 mask")
         if payload_params["mask_only_response"]:
             mask = self._rmbg_mask_only_to_tensor(result, original_image.size)
         elif result.get("mask"):
@@ -537,7 +541,15 @@ class _RmbgSegmentApiBase:
         else:
             mask = self._empty_mask_tensor(original_image.size)
 
-        if result.get("mask"):
+        if payload_params["extra"].get("refine_foreground") and payload_params["is_rmbg"]:
+            # The refined foreground RGB cannot be reconstructed from the source + mask.
+            processed_image = self._decode_png_data_url(result.get("processed_image"), "processed_image")
+            if processed_image.size != original_image.size:
+                processed_image = processed_image.resize(original_image.size, Image.Resampling.BILINEAR)
+            mode = "RGBA" if payload_params["background"] == "Alpha" else "RGB"
+            pixels = np.asarray(processed_image.convert(mode), dtype=np.float32) / 255.0
+            result_image = torch.from_numpy(pixels.copy()).unsqueeze(0)
+        elif result.get("mask"):
             result_image = self._compose_output_image(
                 image_tensor,
                 mask,
@@ -626,11 +638,11 @@ class _RmbgSegmentApiBase:
             RMBG_SERVICE_URL_PRESETS,
         )
         final_service_url = _normalize_rmbg_segment_url(selected_service_url, default_url, endpoint)
-        mask_only_response = endpoint == "rmbg"
+        mask_only_response = endpoint == "rmbg" and not extra.get("refine_foreground", False)
         if image_encoding not in RMBG_IMAGE_ENCODINGS:
             raise ValueError(f"不支持的传输质量: {image_encoding}")
-        if mask_only_response:
-            return_image, return_mask, return_mask_image = False, True, False
+        if endpoint == "rmbg":
+            return_image, return_mask, return_mask_image = not mask_only_response, True, False
         image_tensors = self._expand_images(image)
         if not image_tensors:
             raise RuntimeError("未提供图片")
@@ -649,6 +661,7 @@ class _RmbgSegmentApiBase:
             "return_mask": return_mask,
             "return_mask_image": return_mask_image,
             "mask_only_response": mask_only_response,
+            "is_rmbg": endpoint == "rmbg",
             "image_encoding": image_encoding,
             "extra": extra,
         }
@@ -692,15 +705,10 @@ class ZhiYiRMBGNode(_RmbgSegmentApiBase):
     """知衣 RMBG 2.0 背景去除节点 - 纯 API 调用，不加载本地模型。"""
 
     @classmethod
-    def INPUT_TYPES(cls):
+    def INPUT_TYPES(cls) -> dict:
         return {
             "required": {
                 "image": ("IMAGE",),
-                "service_url": ("STRING", {
-                    "default": FD_RMBG_URL or DEFAULT_RMBG_URL,
-                    "multiline": False,
-                    "tooltip": "RMBG 2.0 背景去除接口地址，例如 http://host:8003/v1/rmbg",
-                }),
                 "process_res": ("INT", {"default": 1024, "min": 256, "max": 2048, "step": 64}),
                 "sensitivity": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05}),
                 "mask_blur": ("INT", {"default": 0, "min": 0, "max": 64, "step": 1}),
@@ -709,19 +717,12 @@ class ZhiYiRMBGNode(_RmbgSegmentApiBase):
                 "refine_foreground": ("BOOLEAN", {"default": False}),
                 "background": (BACKGROUND_MODES, {"default": "Alpha"}),
                 "background_color": ("STRING", {"default": "#222222"}),
-                "return_image": ("BOOLEAN", {"default": True}),
-                "return_mask": ("BOOLEAN", {"default": True}),
-                "return_mask_image": ("BOOLEAN", {"default": False}),
                 "max_concurrency": ("INT", {"default": 1, "min": 1, "max": 16, "step": 1}),
                 "timeout": ("INT", {"default": 180, "min": 10, "max": 1200, "step": 10}),
             },
             "optional": {
                 "health_check": ("BOOLEAN", {"default": False}),
                 "node_switch": ("INT", {"default": 0, "min": 0, "max": 1, "step": 1}),
-                "service_url_preset": (service_url_preset_options(RMBG_SERVICE_URL_PRESETS), {
-                    "default": CUSTOM_SERVICE_URL_PRESET,
-                    "tooltip": "选择部署预设时忽略 service_url；选择自定义时使用 service_url 文本框",
-                }),
                 "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
                 "image_encoding": (RMBG_IMAGE_ENCODINGS, RMBG_IMAGE_ENCODING_CONFIG),
             },
@@ -735,32 +736,29 @@ class ZhiYiRMBGNode(_RmbgSegmentApiBase):
 
     def remove_background(
         self,
-        image,
-        service_url,
-        process_res,
-        sensitivity,
-        mask_blur,
-        mask_offset,
-        invert_output,
-        refine_foreground,
-        background,
-        background_color,
-        return_image,
-        return_mask,
-        return_mask_image,
-        max_concurrency,
-        timeout,
-        health_check=False,
-        node_switch=0,
-        service_url_preset=None,
-        image_delivery=IMAGE_DELIVERY_BASE64,
-        image_encoding: str = "png",
-    ):
+        image: torch.Tensor,
+        process_res: int,
+        sensitivity: float,
+        mask_blur: int,
+        mask_offset: int,
+        invert_output: bool,
+        refine_foreground: bool,
+        background: str,
+        background_color: str,
+        max_concurrency: int,
+        timeout: int,
+        health_check: bool = False,
+        node_switch: int = 0,
+        image_delivery: str = IMAGE_DELIVERY_BASE64,
+        image_encoding: str = RMBG_DEFAULT_IMAGE_ENCODING,
+        **legacy_inputs: object,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, str]:
+        # Old API graphs may still contain routing/return fields; deployment wins.
         return self._execute(
             image=image,
-            service_url=service_url,
+            service_url=RMBG_RUNTIME_URL,
             endpoint="rmbg",
-            default_url=FD_RMBG_URL or DEFAULT_RMBG_URL,
+            default_url=RMBG_RUNTIME_URL,
             health_key="rmbg",
             label="知衣RMBG2.0背景去除",
             process_res=process_res,
@@ -769,18 +767,19 @@ class ZhiYiRMBGNode(_RmbgSegmentApiBase):
             invert_output=invert_output,
             background=background,
             background_color=background_color,
-            return_image=return_image,
-            return_mask=return_mask,
-            return_mask_image=return_mask_image,
+            return_image=bool(refine_foreground),
+            return_mask=True,
+            return_mask_image=False,
             max_concurrency=max_concurrency,
             timeout=timeout,
             health_check=health_check,
             node_switch=node_switch,
-            service_url_preset=service_url_preset,
+            service_url_preset=CUSTOM_SERVICE_URL_PRESET,
             image_delivery=image_delivery,
             image_encoding=image_encoding,
             extra={"sensitivity": float(sensitivity), "refine_foreground": bool(refine_foreground)},
-            info_extra={"sensitivity": float(sensitivity), "refine_foreground": bool(refine_foreground)},
+            info_extra={"sensitivity": float(sensitivity), "refine_foreground": bool(refine_foreground),
+                        "runtime_env": FD_COMFY_RUNTIME_ENV},
         )
 
 

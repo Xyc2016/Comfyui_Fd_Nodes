@@ -201,7 +201,9 @@ def test_input_types_env_first_service_url_second():
     for cls in V2_CLASSES:
         input_types = cls.INPUT_TYPES()
         required_keys = list(input_types["required"])
-        if cls is ZhiYiSAM2SegmentNodeV2:
+        if cls is ZhiYiRMBGNodeV2:
+            assert required_keys[1] == "process_res"
+        elif cls is ZhiYiSAM2SegmentNodeV2:
             assert required_keys[0] == "images"
             assert required_keys[1] == "bboxes"
             assert required_keys[2] == "env"
@@ -220,7 +222,9 @@ def test_input_types_business_params_match_old():
     for v2_cls, old_cls in zip(V2_CLASSES, OLD_CLASSES):
         v2_keys = list(v2_cls.INPUT_TYPES()["required"])
         old_keys = list(old_cls.INPUT_TYPES()["required"])
-        if v2_cls is ZhiYiSAM2SegmentNodeV2:
+        if v2_cls is ZhiYiRMBGNodeV2:
+            assert v2_keys == old_keys
+        elif v2_cls is ZhiYiSAM2SegmentNodeV2:
             assert v2_keys[4:] == old_keys[3:], v2_cls.__name__
         else:
             filtered = [key for key in v2_keys[3:] if key not in switch_filters.get(v2_cls, set())]
@@ -235,6 +239,9 @@ def test_env_options_shape():
 
 def test_env_combo_is_string_options():
     for cls in V2_CLASSES:
+        if cls is ZhiYiRMBGNodeV2:
+            assert "env" not in cls.INPUT_TYPES()["required"]
+            continue
         options, config = cls.INPUT_TYPES()["required"]["env"]
         assert all(isinstance(option, str) for option in options)
 
@@ -243,7 +250,7 @@ def test_env_combo_is_string_options():
 
 
 def test_env_defaults():
-    for cls in [ZhiYiRMBGNodeV2, ZhiYiClothesSegmentNodeV2, ZhiYiFashionSegmentNodeV2, ZhiYiBodySegmentNodeV2]:
+    for cls in [ZhiYiClothesSegmentNodeV2, ZhiYiFashionSegmentNodeV2, ZhiYiBodySegmentNodeV2]:
         assert cls.INPUT_TYPES()["required"]["env"][1]["default"] == "开发环境"
 
     for cls in [ZhiYiDWPoseDetectNodeV2, ZhiYiLineArtPreprocessorNodeV2, ZhiYiDepthAnythingV2PreprocessorNodeV2, ZhiYiSAM2SegmentNodeV2]:
@@ -353,7 +360,8 @@ def test_rmbg_v2_dev_env_url(monkeypatch):
 
     def fake_request(method, url, timeout, **kwargs):
         calls.append(url)
-        return DummyResponse(data=_segment_response())
+        return DummyResponse(data={**_segment_response(), "processed_image": None, "mask_image": None,
+                                   "inference_size": {"width": 2, "height": 2}, "output_size": {"width": 2, "height": 2}})
 
     monkeypatch.setattr(rmbg_module.requests, "request", fake_request)
 
@@ -695,33 +703,18 @@ def test_sam2_v2_three_envs_post_urls(monkeypatch):
     ]
 
 
-def test_rmbg_v2_invalid_env_raises(monkeypatch):
+def test_rmbg_v2_legacy_env_cannot_override_deployment(monkeypatch):
     node = ZhiYiRMBGNodeV2()
+    captured = {}
 
-    def fake_request(method, url, timeout, **kwargs):
-        raise AssertionError("不应发出请求")
+    def execute(**kwargs):
+        captured.update(kwargs)
+        return None
 
-    monkeypatch.setattr(rmbg_module.requests, "request", fake_request)
-
-    with pytest.raises(RuntimeError, match="未知的 env: 不存在"):
-        node.remove_background(
-            image=torch.zeros((1, 2, 2, 3), dtype=torch.float32),
-            env="不存在",
-            service_url="",
-            process_res=1024,
-            sensitivity=1.0,
-            mask_blur=0,
-            mask_offset=0,
-            invert_output=False,
-            refine_foreground=False,
-            background="Alpha",
-            background_color="#222222",
-            return_image=True,
-            return_mask=True,
-            return_mask_image=False,
-            max_concurrency=1,
-            timeout=30,
-        )
+    monkeypatch.setattr(node, "_execute", execute)
+    kwargs = {name: spec[1]["default"] for name, spec in node.INPUT_TYPES()["required"].items() if name != "image"}
+    node.remove_background(image=torch.zeros(1, 2, 2, 3), env="不存在", service_url="http://wrong", **kwargs)
+    assert captured["service_url"] == rmbg_module.RMBG_RUNTIME_URL
 
 
 # ---------- 9. 老节点回归保护 ----------
@@ -742,6 +735,8 @@ def test_old_controlnet_payload_still_returns_image_true():
 
 def test_old_nodes_unchanged_input_types():
     for old_cls in OLD_CLASSES:
+        if old_cls is ZhiYiRMBGNode:
+            continue
         input_types = old_cls.INPUT_TYPES()
         assert "env" not in input_types["required"]
         assert list(input_types["required"])[1] == "bboxes" or list(input_types["required"])[1] == "service_url"
@@ -773,7 +768,8 @@ def test_v2_node_switch_short_circuit(monkeypatch):
         timeout=30,
         node_switch=1,
     )
-    assert torch.equal(result_image, image)
+    assert result_image.shape == (1, 2, 2, 4)
+    assert torch.count_nonzero(result_image) == 0
     assert json.loads(info_text)["skipped"] is True
 
     dwpose_node = ZhiYiDWPoseDetectNodeV2()

@@ -105,6 +105,7 @@ def test_node_quality_ignores_old_environment_switch(monkeypatch, node_cls: type
     monkeypatch.setattr(module, "tensor_to_image_payload", lambda *args: "data:image/png;base64,input")
     monkeypatch.setattr(module, "tensor_to_jpeg_q95_payload", lambda *args: "data:image/jpeg;base64,input")
     node = node_cls()
+    monkeypatch.setattr(module, "RMBG_RUNTIME_URL", "http://domestic.example/v1/rmbg")
 
     def post(url: str, payload: dict, timeout: int, label: str) -> dict:
         assert url == "http://domestic.example/v1/rmbg"
