@@ -18,6 +18,8 @@ from ..zhiyi_rmbg_segment_node import (
     BODY_CLASSES,
     CLOTHES_CLASSES,
     FASHION_CLASSES,
+    RMBG_IMAGE_ENCODINGS,
+    RMBG_IMAGE_ENCODING_CONFIG,
     _RmbgSegmentApiBase,
 )
 from .env import resolve_service_env, service_env_options
@@ -58,6 +60,7 @@ class ZhiYiRMBGNodeV2(_RmbgSegmentApiBase):
                 "health_check": ("BOOLEAN", {"default": False}),
                 "node_switch": ("INT", {"default": 0, "min": 0, "max": 1, "step": 1}),
                 "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
+                "image_encoding": (RMBG_IMAGE_ENCODINGS, RMBG_IMAGE_ENCODING_CONFIG),
             },
         }
 
@@ -88,6 +91,7 @@ class ZhiYiRMBGNodeV2(_RmbgSegmentApiBase):
         health_check=False,
         node_switch=0,
         image_delivery=IMAGE_DELIVERY_BASE64,
+        image_encoding: str = "png",
     ):
         resolved_base = resolve_service_env(env, RMBG_SERVICE_ENVS)
         return self._execute(
@@ -112,6 +116,7 @@ class ZhiYiRMBGNodeV2(_RmbgSegmentApiBase):
             node_switch=node_switch,
             service_url_preset=CUSTOM_SERVICE_URL_PRESET,
             image_delivery=image_delivery,
+            image_encoding=image_encoding,
             extra={"sensitivity": float(sensitivity), "refine_foreground": bool(refine_foreground)},
             info_extra={"sensitivity": float(sensitivity), "refine_foreground": bool(refine_foreground)},
         )

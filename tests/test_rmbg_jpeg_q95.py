@@ -85,7 +85,6 @@ def test_url_upload_error_does_not_fall_back_to_base64(monkeypatch) -> None:
 
 @pytest.mark.parametrize("background", ["Alpha", "Color"])
 def test_q95_node_posts_inference_copy_but_composes_original(monkeypatch, background: str) -> None:
-    monkeypatch.setattr(module, "FD_RMBG_REMOTE_OPTIMIZATION", True)
     image = source_tensor()
     original = image.clone()
     node = ZhiYiRMBGNodeV2()
@@ -109,7 +108,7 @@ def test_q95_node_posts_inference_copy_but_composes_original(monkeypatch, backgr
 
     monkeypatch.setattr(encoding, "upload_bytes_to_oss", upload)
     monkeypatch.setattr(node, "_post_process", post)
-    output, mask, _, info = call_node(node, image, image_delivery="url", background=background, background_color="#ffffff")
+    output, mask, _, info = call_node(node, image, image_encoding="jpeg_q95", image_delivery="url", background=background, background_color="#ffffff")
     assert captured[0] == encoding.tensor_to_jpeg_q95_bytes(image)
     assert torch.equal(image, original)
     if background == "Alpha":
@@ -122,5 +121,10 @@ def test_q95_node_posts_inference_copy_but_composes_original(monkeypatch, backgr
 
 
 @pytest.mark.parametrize("node_cls", [module.ZhiYiRMBGNode, ZhiYiRMBGNodeV2])
-def test_encoding_is_not_a_node_input(node_cls: type) -> None:
-    assert all("image_encoding" not in fields for fields in node_cls.INPUT_TYPES().values())
+def test_quality_is_an_optional_single_choice_with_legacy_png_default(node_cls: type) -> None:
+    fields = node_cls.INPUT_TYPES()["optional"]
+    assert list(fields)[-1] == "image_encoding"  # Append without shifting existing widgets.
+    choices, config = fields["image_encoding"]
+    assert choices == ["png", "jpeg_q95"]
+    assert config["default"] == "png"
+    assert "multi_select" not in config

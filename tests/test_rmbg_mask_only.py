@@ -12,11 +12,6 @@ from src.Comfyui_Fd_Nodes.v2.rmbg_segment_v2_node import ZhiYiRMBGNodeV2
 from src.Comfyui_Fd_Nodes.config import FD_OVERSEAS_DWPOSE_URL
 
 
-@pytest.fixture(autouse=True)
-def enable_optimization(monkeypatch) -> None:
-    monkeypatch.setattr(module, "FD_RMBG_REMOTE_OPTIMIZATION", True)
-
-
 def mask_response(size: tuple[int, int] = (5, 3), source_size: tuple[int, int] = (5, 3)) -> dict:
     values = np.linspace(0, 255, size[0] * size[1], dtype=np.uint8).reshape(size[1], size[0])
     buffer = io.BytesIO()
@@ -85,10 +80,8 @@ def test_overseas_returns_only_mask_and_composes_original(monkeypatch, node_cls:
     assert (info["return_image"], info["return_mask"], info["return_mask_image"]) == (False, True, False)
 
 
-@pytest.mark.parametrize("disabled,segment", [(True, False), (True, True), (False, True)])
-def test_scope_and_rollback_keep_original_return_flags(monkeypatch, disabled: bool, segment: bool) -> None:
-    node = module.ZhiYiBodySegmentNode() if segment else module.ZhiYiRMBGNode()
-    monkeypatch.setattr(module, "FD_RMBG_REMOTE_OPTIMIZATION", not disabled)
+def test_other_segment_nodes_keep_original_return_flags(monkeypatch) -> None:
+    node = module.ZhiYiBodySegmentNode()
     monkeypatch.setattr(module, "tensor_to_image_payload", lambda *args: "data:image/png;base64,input")
 
     def post(url: str, payload: dict, timeout: int, label: str) -> dict:
@@ -101,28 +94,34 @@ def test_scope_and_rollback_keep_original_return_flags(monkeypatch, disabled: bo
 
 
 @pytest.mark.parametrize("node_cls", [module.ZhiYiRMBGNode, ZhiYiRMBGNodeV2])
-@pytest.mark.parametrize("enabled", [False, True])
-def test_environment_switch_applies_to_domestic_rmbg(monkeypatch, node_cls: type, enabled: bool) -> None:
-    monkeypatch.setattr(module, "FD_RMBG_REMOTE_OPTIMIZATION", enabled)
+@pytest.mark.parametrize("image_encoding", ["png", "jpeg_q95"])
+@pytest.mark.parametrize("old_flag", [None, "0", "1"])
+def test_node_quality_ignores_old_environment_switch(monkeypatch, node_cls: type, image_encoding: str,
+                                                     old_flag: str | None, caplog) -> None:
+    if old_flag is None:
+        monkeypatch.delenv("FD_RMBG_REMOTE_OPTIMIZATION", raising=False)
+    else:
+        monkeypatch.setenv("FD_RMBG_REMOTE_OPTIMIZATION", old_flag)
     monkeypatch.setattr(module, "tensor_to_image_payload", lambda *args: "data:image/png;base64,input")
     monkeypatch.setattr(module, "tensor_to_jpeg_q95_payload", lambda *args: "data:image/jpeg;base64,input")
     node = node_cls()
 
     def post(url: str, payload: dict, timeout: int, label: str) -> dict:
         assert url == "http://domestic.example/v1/rmbg"
-        assert payload["image"].startswith("data:image/jpeg;" if enabled else "data:image/png;")
-        assert (payload["return_image"], payload["return_mask"], payload["return_mask_image"]) == (
-            (False, True, False) if enabled else (True, False, True)
-        )
+        assert payload["image"].startswith("data:image/jpeg;" if image_encoding == "jpeg_q95" else "data:image/png;")
+        assert (payload["return_image"], payload["return_mask"], payload["return_mask_image"]) == (False, True, False)
         return mask_response()
 
     monkeypatch.setattr(node, "_post_process", post)
     overrides = {"env": "自定义（使用 service_url）"} if node_cls is ZhiYiRMBGNodeV2 else {}
-    *_, info_text = call_node(node, torch.zeros(1, 3, 5, 3), service_url="http://domestic.example/v1/rmbg",
-                             return_image=True, return_mask=False, return_mask_image=True, **overrides)
+    with caplog.at_level("INFO", logger=module.__name__):
+        *_, info_text = call_node(node, torch.zeros(1, 3, 5, 3), service_url="http://domestic.example/v1/rmbg",
+                                 image_encoding=image_encoding, return_image=True, return_mask=False,
+                                 return_mask_image=True, **overrides)
     info = json.loads(info_text)
-    assert info["mask_only_response"] is enabled
-    assert info["image_encoding"] == ("jpeg_q95" if enabled else "png")
+    assert info["mask_only_response"] is True
+    assert info["image_encoding"] == image_encoding
+    assert f"image_encoding={image_encoding} mask_only_response=True" in caplog.text
 
 
 def test_declared_inference_mask_is_restored_with_bilinear() -> None:

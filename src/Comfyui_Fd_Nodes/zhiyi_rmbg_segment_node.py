@@ -2,7 +2,6 @@ import base64
 import io
 import json
 import logging
-import os
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -43,7 +42,11 @@ DEFAULT_CLOTHES_SEGMENT_URL = "http://10.1.0.230:8003/v1/segment/clothes"
 DEFAULT_FASHION_SEGMENT_URL = "http://10.1.0.230:8003/v1/segment/fashion"
 DEFAULT_BODY_SEGMENT_URL = "http://10.1.0.230:8003/v1/segment/body"
 BACKGROUND_MODES = ["Alpha", "Color"]
-FD_RMBG_REMOTE_OPTIMIZATION = os.getenv("FD_RMBG_REMOTE_OPTIMIZATION") == "1"
+RMBG_IMAGE_ENCODINGS = ["png", "jpeg_q95"]
+RMBG_IMAGE_ENCODING_CONFIG = {
+    "default": "png",
+    "tooltip": "传输质量（单选）：png 无损；jpeg_q95 使用 JPEG Q95 推理副本节省流量，成图仍用原始 RGB。",
+}
 
 
 def _response_size(result: dict, field: str) -> tuple[int, int]:
@@ -521,7 +524,10 @@ class _RmbgSegmentApiBase:
         payload.update(payload_params["extra"])
 
         label = payload_params["label"]
-        logger.info("Calling %s API idx=%s service_url=%s", label, idx, service_url)
+        logger.info(
+            "Calling %s API idx=%s service_url=%s image_encoding=%s mask_only_response=%s",
+            label, idx, service_url, payload_params["image_encoding"], payload_params["mask_only_response"],
+        )
         result = self._post_process(service_url, payload, timeout, label)
 
         if payload_params["mask_only_response"]:
@@ -602,6 +608,7 @@ class _RmbgSegmentApiBase:
         extra,
         info_extra,
         image_delivery=IMAGE_DELIVERY_BASE64,
+        image_encoding: str = "png",
     ):
         if node_switch == 1:
             image_batch = self._normalize_image_batch(image)
@@ -619,8 +626,9 @@ class _RmbgSegmentApiBase:
             RMBG_SERVICE_URL_PRESETS,
         )
         final_service_url = _normalize_rmbg_segment_url(selected_service_url, default_url, endpoint)
-        mask_only_response = FD_RMBG_REMOTE_OPTIMIZATION and endpoint == "rmbg"
-        image_encoding = "jpeg_q95" if mask_only_response else "png"
+        mask_only_response = endpoint == "rmbg"
+        if image_encoding not in RMBG_IMAGE_ENCODINGS:
+            raise ValueError(f"不支持的传输质量: {image_encoding}")
         if mask_only_response:
             return_image, return_mask, return_mask_image = False, True, False
         image_tensors = self._expand_images(image)
@@ -715,6 +723,7 @@ class ZhiYiRMBGNode(_RmbgSegmentApiBase):
                     "tooltip": "选择部署预设时忽略 service_url；选择自定义时使用 service_url 文本框",
                 }),
                 "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
+                "image_encoding": (RMBG_IMAGE_ENCODINGS, RMBG_IMAGE_ENCODING_CONFIG),
             },
         }
 
@@ -745,6 +754,7 @@ class ZhiYiRMBGNode(_RmbgSegmentApiBase):
         node_switch=0,
         service_url_preset=None,
         image_delivery=IMAGE_DELIVERY_BASE64,
+        image_encoding: str = "png",
     ):
         return self._execute(
             image=image,
@@ -768,6 +778,7 @@ class ZhiYiRMBGNode(_RmbgSegmentApiBase):
             node_switch=node_switch,
             service_url_preset=service_url_preset,
             image_delivery=image_delivery,
+            image_encoding=image_encoding,
             extra={"sensitivity": float(sensitivity), "refine_foreground": bool(refine_foreground)},
             info_extra={"sensitivity": float(sensitivity), "refine_foreground": bool(refine_foreground)},
         )

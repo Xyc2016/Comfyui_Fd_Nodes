@@ -141,7 +141,7 @@ def test_rmbg_and_segment_node_metadata():
         assert node_cls.RETURN_TYPES == ("IMAGE", "MASK", "IMAGE", "JSON")
         assert node_cls.RETURN_NAMES == ("IMAGE", "MASK", "MASK_IMAGE", "INFO")
         input_types = node_cls.INPUT_TYPES()
-        assert list(input_types["optional"])[-2:] == ["service_url_preset", "image_delivery"]
+        assert list(input_types["optional"])[2:4] == ["service_url_preset", "image_delivery"]
         preset_options, preset_config = input_types["optional"]["service_url_preset"]
         assert preset_options == [CUSTOM_SERVICE_URL_PRESET, "10.1.0.230"]
         assert preset_config["default"] == CUSTOM_SERVICE_URL_PRESET
@@ -276,16 +276,16 @@ def test_rmbg_posts_full_payload_and_decodes_outputs(monkeypatch):
         assert payload["refine_foreground"] is True
         assert payload["background"] == "Color"
         assert payload["background_color"] == "#ffffff"
-        assert payload["return_image"] is True
+        assert payload["return_image"] is False
         assert payload["return_mask"] is True
-        assert payload["return_mask_image"] is True
+        assert payload["return_mask_image"] is False
         assert payload["image_format"] == "png_base64"
         data = _segment_response(
             request_id="rmbg-1",
             classes=[],
             preprocessor="RMBGPreprocessor",
-            processed_image=_image_data_url(color=(0, 255, 0)),
-            mask_image=_image_data_url(color=(255, 0, 0)),
+            processed_image=None,
+            mask_image=None,
         )
         data["model_name"] = "RMBG-2.0"
         data["model_type"] = "background_removal"
@@ -319,10 +319,10 @@ def test_rmbg_posts_full_payload_and_decodes_outputs(monkeypatch):
     assert result_image.shape == (1, 2, 2, 3)
     assert mask.shape == (1, 2, 2)
     assert mask_image.shape == (1, 2, 2, 3)
-    # The image output uses the original RGB and mask, not the server's green image.
+    # Compose output and grayscale preview locally from the returned mask.
     assert torch.equal(result_image[0, 0, 0], torch.tensor([0.0, 0.0, 0.0]))
     assert torch.equal(mask, torch.tensor([[[1.0, 0.0], [0.0, 1.0]]]))
-    assert torch.equal(mask_image[0, 0, 0], torch.tensor([1.0, 0.0, 0.0]))
+    assert torch.equal(mask_image[0, 0, 0], torch.tensor([1.0, 1.0, 1.0]))
     assert info["service_url"] == "http://example.com:8003/v1/rmbg"
     assert info["sensitivity"] == 0.85
     assert info["refine_foreground"] is True
@@ -545,7 +545,7 @@ def test_image_delivery_appended_and_default_preserves_signature(node_cls, endpo
     old_optional = ["health_check", "node_switch"]
     if not is_v2:
         old_optional.append("service_url_preset")
-    assert list(inputs["optional"]) == old_optional + ["image_delivery"]
+    assert list(inputs["optional"]) == old_optional + ["image_delivery"] + (["image_encoding"] if endpoint == "rmbg" else [])
     options, config = inputs["optional"]["image_delivery"]
     assert options == ["base64", "url"]
     assert config == image_payload.image_delivery_input_config()
@@ -586,7 +586,7 @@ def test_url_delivery_posts_png_url_and_authenticates_health(monkeypatch, node_c
         payload = kwargs["json"]
         assert payload["image"] == image_url
         assert payload["image_format"] == "png_base64"
-        assert payload["return_image"] is True
+        assert payload["return_image"] is (endpoint != "rmbg")
         assert payload["return_mask"] is True
         assert payload["return_mask_image"] is False
         if endpoint == "rmbg":
@@ -594,7 +594,8 @@ def test_url_delivery_posts_png_url_and_authenticates_health(monkeypatch, node_c
             assert payload["refine_foreground"] is False
         else:
             assert payload["classes"]
-        return DummyResponse(data=_segment_response(size=(5, 3), request_id="url-test"))
+        return DummyResponse(data=_segment_response(size=(5, 3), request_id="url-test",
+                                                    **({"processed_image": None} if endpoint == "rmbg" else {})))
 
     monkeypatch.setattr(image_payload, "_upload_png_bytes_to_oss_url", fake_upload)
     monkeypatch.setattr(rmbg_module, "FD_DWPOSE_API_KEY", " test-rmbg-key ")
@@ -638,7 +639,8 @@ def test_legacy_positional_call_uses_base64_without_upload(monkeypatch, node_cls
         with Image.open(io.BytesIO(png_bytes)) as png:
             assert png.format == "PNG"
             assert png.size == (5, 3)
-        return DummyResponse(data=_segment_response(size=(5, 3)))
+        return DummyResponse(data=_segment_response(size=(5, 3),
+                                                    **({"processed_image": None} if endpoint == "rmbg" else {})))
 
     monkeypatch.setattr(image_payload, "_upload_png_bytes_to_oss_url", fail_upload)
     monkeypatch.setattr(rmbg_module, "FD_DWPOSE_API_KEY", "")
@@ -646,7 +648,7 @@ def test_legacy_positional_call_uses_base64_without_upload(monkeypatch, node_cls
     kwargs = _delivery_node_kwargs(node, image=image)
     inputs = node.INPUT_TYPES()
     positional = [kwargs[name] for name in inputs["required"]]
-    positional.extend(spec[1]["default"] for name, spec in inputs["optional"].items() if name != "image_delivery")
+    positional.extend(spec[1]["default"] for name, spec in inputs["optional"].items() if name not in ("image_delivery", "image_encoding"))
     _, _, _, info_text = getattr(node, node.FUNCTION)(*positional)
     assert calls == [("POST", f"https://example.com/api/v1/{endpoint}")]
     assert json.loads(info_text)["image_delivery"] == "base64"
