@@ -104,3 +104,12 @@ You need to make an account on https://registry.comfy.org and create an API key 
 
 A Github action will run on every git push. You can also run the Github action manually. Full instructions [here](https://docs.comfy.org/registry/publishing). Join our [discord](https://discord.com/invite/comfyorg) if you have any questions!
 
+# 图生文 Combo 模型
+
+`知衣-图生文-combo`（`ZhiYiImageTextComboNode`）从 53.8.76 起可在末尾的
+`model` 下拉框选择 `qwen3.7-plus`。默认仍为 `doubao-seed-2.0-mini`，旧工作流不填
+`model` 时沿用原行为。Qwen 直接调用 `FD_LITELLM_BASE_URL` 的 Chat Completions，
+不经过 `FD_DOUBAO_VISION_URL`；保留多图、system_prompt、temperature、max_tokens、
+并发和重试设置。国内默认 base64，海外继续按部署规则上传 OSS 后传 URL。
+使用前须确认所在 LiteLLM 网关和调用 Key 已提供 `qwen3.7-plus`。
+

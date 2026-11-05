@@ -3,6 +3,7 @@ import time
 import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any
 
 import requests
 
@@ -23,10 +24,11 @@ logger = logging.getLogger(__name__)
 
 
 class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
-    """知衣多图图生文节点 - 接收最多8个图片组合并发调用豆包视觉理解 API。"""
+    """知衣多图图生文节点，支持豆包和 Qwen 图片理解。"""
 
     DEFAULT_PROMPT = "介绍这幅图片"
     MODEL = "doubao-seed-2.0-mini"
+    MODELS = [MODEL, "qwen3.7-plus"]
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -80,6 +82,7 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                     "multiline": True,
                 }),
                 "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
+                "model": (cls.MODELS, {"default": cls.MODEL}),
             },
         }
 
@@ -88,6 +91,14 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
     FUNCTION = "generate"
     CATEGORY = "知衣/图生文"
     OUTPUT_NODE = False
+
+    def _build_request_payload(
+        self, messages: list[dict[str, Any]], temperature: float, max_tokens: int,
+        model: str = MODEL,
+    ) -> dict[str, Any]:
+        payload = super()._build_request_payload(messages, temperature, max_tokens)
+        payload["model"] = model
+        return payload
 
     def _expand_images(self, combo_images):
         result = []
@@ -342,11 +353,14 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
         combo_8=None,
         system_prompt="",
         image_delivery=None,
-    ):
+        model: str = MODEL,
+    ) -> tuple[str, str]:
         if node_switch == 1:
             return ("", "node skipped")
 
         image_delivery = resolve_image_delivery(image_delivery)
+        if model not in self.MODELS:
+            raise ValueError(f"不支持的图生文模型: {model}")
         cfg = load_config()
         base_url = cfg["base_url"].rstrip("/")
         api_key = cfg["api_key"]
@@ -382,7 +396,7 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                     raise RuntimeError("无有效图片")
 
                 prompt = self._select_prompt(combo)
-                if FD_DOUBAO_VISION_URL:
+                if model == self.MODEL and FD_DOUBAO_VISION_URL:
                     image_refs = []
                     for image in expanded_images:
                         image_ref, image_info = self._prepare_image_reference(
@@ -422,7 +436,7 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                     prompt, [""] * len(expanded_images), system_prompt
                 )
                 placeholder_payload = self._build_request_payload(
-                    placeholder_messages, temperature, max_tokens
+                    placeholder_messages, temperature, max_tokens, model
                 )
                 image_budget = self._image_budget(
                     placeholder_payload, len(expanded_images)
@@ -438,7 +452,7 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                     image_infos.append(image_info)
 
                 messages = self._build_messages(prompt, data_urls, system_prompt)
-                payload = self._build_request_payload(messages, temperature, max_tokens)
+                payload = self._build_request_payload(messages, temperature, max_tokens, model)
                 request_body, request_body_bytes = self._serialize_request_body(
                     payload,
                     allow_over_budget=any(
@@ -510,7 +524,7 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
         successful_count = sum(1 for item in result_items if item and item.get("ok"))
         header = (
             f"总计: {successful_count}/{len(combo_inputs)} 成功, "
-            f"url={url}, 并发上限={max_concurrency}, retry_count={retry_count}"
+            f"model={model}, url={url}, 并发上限={max_concurrency}, retry_count={retry_count}"
         )
         log_lines = [header]
         if pre_errors:
