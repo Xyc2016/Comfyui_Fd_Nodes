@@ -49,6 +49,7 @@ def test_qwen_preserves_multimodal_contract_and_bypasses_doubao(monkeypatch, vis
     assert request["url"] == "https://chat.example.com/v1/chat/completions"
     body = json.loads(request["data"])
     assert body["model"] == "qwen3.7-plus"
+    assert body["enable_thinking"] is False
     assert body["stream"] is False
     assert body["temperature"] == 0.25 and body["max_tokens"] == 333
     assert body["messages"] == [
@@ -67,5 +68,7 @@ def test_model_widget_is_appended_after_existing_widgets():
 def test_qwen_payload_does_not_change_subsequent_default_request():
     node = module.ZhiYiImageTextComboNode()
     messages = [{"role": "user", "content": []}]
-    assert node._build_request_payload(messages, 0.7, 100, "doubao-seed-2.0-mini")["model"] == "doubao-seed-2.0-mini"
+    doubao_payload = node._build_request_payload(messages, 0.7, 100, "doubao-seed-2.0-mini")
+    assert doubao_payload["model"] == "doubao-seed-2.0-mini"
+    assert "enable_thinking" not in doubao_payload
     assert node._build_request_payload(messages, 0.7, 100)["model"] == "qwen3.7-plus"

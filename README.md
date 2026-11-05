@@ -112,4 +112,5 @@ A Github action will run on every git push. You can also run the Github action m
 不经过 `FD_DOUBAO_VISION_URL`；保留多图、system_prompt、temperature、max_tokens、
 并发和重试设置。国内默认 base64，海外继续按部署规则上传 OSS 后传 URL。
 使用前须确认所在 LiteLLM 网关和调用 Key 已提供 `qwen3.7-plus`。
+从 53.8.78 起，Qwen 请求固定发送 `enable_thinking=false`，避免短图片理解任务长时间思考。
 

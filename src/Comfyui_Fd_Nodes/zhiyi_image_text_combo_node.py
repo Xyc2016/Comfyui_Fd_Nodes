@@ -99,6 +99,8 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
     ) -> dict[str, Any]:
         payload = super()._build_request_payload(messages, temperature, max_tokens)
         payload["model"] = model
+        if model == self.MODEL:
+            payload["enable_thinking"] = False
         return payload
 
     def _expand_images(self, combo_images):
