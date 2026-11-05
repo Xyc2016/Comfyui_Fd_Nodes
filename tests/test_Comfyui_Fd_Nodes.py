@@ -2078,7 +2078,7 @@ def test_zhiyi_image_text_combo_sends_multiple_images_in_one_request(monkeypatch
     assert text == "both images"
     assert "总计: 1/1 成功" in log_text
     payload = captured_payloads[0]
-    assert payload["model"] == "doubao-seed-2.0-mini"
+    assert payload["model"] == "qwen3.7-plus"
     assert payload["messages"][0]["role"] == "system"
     content = payload["messages"][1]["content"]
     assert content[0] == {"type": "text", "text": "describe both images"}

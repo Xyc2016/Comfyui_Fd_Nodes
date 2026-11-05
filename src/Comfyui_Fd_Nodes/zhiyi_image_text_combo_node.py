@@ -27,8 +27,9 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
     """知衣多图图生文节点，支持豆包和 Qwen 图片理解。"""
 
     DEFAULT_PROMPT = "介绍这幅图片"
-    MODEL = "doubao-seed-2.0-mini"
-    MODELS = [MODEL, "qwen3.7-plus"]
+    MODEL = "qwen3.7-plus"
+    DOUBAO_MODEL = "doubao-seed-2.0-mini"
+    MODELS = [MODEL, DOUBAO_MODEL]
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -396,7 +397,7 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                     raise RuntimeError("无有效图片")
 
                 prompt = self._select_prompt(combo)
-                if model == self.MODEL and FD_DOUBAO_VISION_URL:
+                if model == self.DOUBAO_MODEL and FD_DOUBAO_VISION_URL:
                     image_refs = []
                     for image in expanded_images:
                         image_ref, image_info = self._prepare_image_reference(

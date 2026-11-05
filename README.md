@@ -107,8 +107,8 @@ A Github action will run on every git push. You can also run the Github action m
 # 图生文 Combo 模型
 
 `知衣-图生文-combo`（`ZhiYiImageTextComboNode`）从 53.8.76 起可在末尾的
-`model` 下拉框选择 `qwen3.7-plus`。默认仍为 `doubao-seed-2.0-mini`，旧工作流不填
-`model` 时沿用原行为。Qwen 直接调用 `FD_LITELLM_BASE_URL` 的 Chat Completions，
+`model` 下拉框选择 `qwen3.7-plus`。从 53.8.77 起默认使用 `qwen3.7-plus`，未填写
+`model` 的旧 API 工作流也使用该默认值；豆包仍可手动选择。Qwen 直接调用 `FD_LITELLM_BASE_URL` 的 Chat Completions，
 不经过 `FD_DOUBAO_VISION_URL`；保留多图、system_prompt、temperature、max_tokens、
 并发和重试设置。国内默认 base64，海外继续按部署规则上传 OSS 后传 URL。
 使用前须确认所在 LiteLLM 网关和调用 Key 已提供 `qwen3.7-plus`。

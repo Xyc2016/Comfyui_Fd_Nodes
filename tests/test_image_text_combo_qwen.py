@@ -39,7 +39,7 @@ def test_qwen_preserves_multimodal_contract_and_bypasses_doubao(monkeypatch, vis
     monkeypatch.setattr(module.requests, "post", post)
     output, log = node.generate(
         combo_1={"images": [torch.zeros((2, 16, 16, 3))], "prompts": ["Compare the two images."]},
-        model="qwen3.7-plus", system_prompt="Describe colors only.", temperature=0.25, max_tokens=333,
+        system_prompt="Describe colors only.", temperature=0.25, max_tokens=333,
         retry_count=0, image_delivery=image_delivery,
     )
     assert output == "red, blue"
@@ -61,11 +61,11 @@ def test_qwen_preserves_multimodal_contract_and_bypasses_doubao(monkeypatch, vis
 def test_model_widget_is_appended_after_existing_widgets():
     fields = module.ZhiYiImageTextComboNode.INPUT_TYPES()
     assert list(fields["optional"])[-1] == "model"
-    assert "qwen3.7-plus" in fields["optional"]["model"][0]
+    assert fields["optional"]["model"] == (["qwen3.7-plus", "doubao-seed-2.0-mini"], {"default": "qwen3.7-plus"})
 
 
 def test_qwen_payload_does_not_change_subsequent_default_request():
     node = module.ZhiYiImageTextComboNode()
     messages = [{"role": "user", "content": []}]
-    assert node._build_request_payload(messages, 0.7, 100, "qwen3.7-plus")["model"] == "qwen3.7-plus"
-    assert node._build_request_payload(messages, 0.7, 100)["model"] == "doubao-seed-2.0-mini"
+    assert node._build_request_payload(messages, 0.7, 100, "doubao-seed-2.0-mini")["model"] == "doubao-seed-2.0-mini"
+    assert node._build_request_payload(messages, 0.7, 100)["model"] == "qwen3.7-plus"

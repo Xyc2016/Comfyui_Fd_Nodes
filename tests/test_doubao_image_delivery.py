@@ -56,6 +56,7 @@ def run_node(monkeypatch, route, combo, **kwargs):
         images[1, ..., 1] = 1
         result = combo_module.ZhiYiImageTextComboNode().generate(
             combo_1={"images": [images], "prompt": "保持提示"},
+            model="doubao-seed-2.0-mini",
             system_prompt="系统提示", temperature=0.35, max_tokens=77, retry_count=0, **kwargs,
         )
     else:
