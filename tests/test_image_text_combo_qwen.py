@@ -9,17 +9,27 @@ from src.Comfyui_Fd_Nodes import zhiyi_image_text_combo_node as module
 
 
 @pytest.mark.parametrize("vision_url", ["", "https://legacy.example.com/image/image_to_text_doubao"])
-@pytest.mark.parametrize("image_delivery", ["base64", "url"])
-def test_qwen_preserves_multimodal_contract_and_bypasses_doubao(monkeypatch, vision_url, image_delivery):
+@pytest.mark.parametrize("image_delivery", [None, "base64", "url"])
+@pytest.mark.parametrize("overseas", [False, True])
+def test_qwen_preserves_multimodal_contract_and_bypasses_doubao(
+    monkeypatch: pytest.MonkeyPatch, vision_url: str, image_delivery: str | None, overseas: bool,
+) -> None:
     monkeypatch.delenv("FD_OVERSEAS_GPU_GATEWAY", raising=False)
     monkeypatch.delenv("FD_IMAGE_DELIVERY", raising=False)
+    if overseas:
+        monkeypatch.setenv("FD_OVERSEAS_GPU_GATEWAY", "https://gateway.example.com")
+        monkeypatch.setenv("FD_IMAGE_DELIVERY", "url")
     monkeypatch.setattr(module, "FD_DOUBAO_VISION_URL", vision_url)
     monkeypatch.setattr(module, "load_config", lambda: {"base_url": "https://chat.example.com", "api_key": "test"})
     node = module.ZhiYiImageTextComboNode()
-    refs = (["data:image/jpeg;base64,RED", "data:image/jpeg;base64,BLUE"] if image_delivery == "base64"
-            else ["https://images.example.com/red.png", "https://images.example.com/blue.png"])
+    expected_delivery = "base64"
+    refs = ["data:image/jpeg;base64,RED", "data:image/jpeg;base64,BLUE"]
     prepared = iter(refs)
-    monkeypatch.setattr(node, "_prepare_image_reference", lambda *args: (next(prepared), {}))
+    def prepare(_image: torch.Tensor, delivery: str, _budget: int) -> tuple[str, dict[str, object]]:
+        assert delivery == expected_delivery
+        return next(prepared), {}
+
+    monkeypatch.setattr(node, "_prepare_image_reference", prepare)
     captured = []
 
     class Response:
@@ -59,8 +69,10 @@ def test_qwen_preserves_multimodal_contract_and_bypasses_doubao(monkeypatch, vis
     ]
 
 
-def test_model_widget_is_appended_after_existing_widgets():
+def test_model_widget_is_appended_after_existing_widgets(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FD_OVERSEAS_GPU_GATEWAY", "https://gateway.example.com")
     fields = module.ZhiYiImageTextComboNode.INPUT_TYPES()
+    assert "image_delivery" not in fields["optional"]
     assert list(fields["optional"])[-1] == "model"
     assert fields["optional"]["model"] == (["qwen3.7-plus", "doubao-seed-2.0-mini"], {"default": "qwen3.7-plus"})
 

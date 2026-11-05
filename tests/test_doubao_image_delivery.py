@@ -84,9 +84,11 @@ def test_delivery_environment_matrix(monkeypatch, gateway, setting, explicit, ex
 
 
 @pytest.mark.parametrize("route", ["image-generation", "chat"])
-@pytest.mark.parametrize("combo", [False, True])
 @pytest.mark.parametrize("mode", ["explicit", "overseas-default", "overseas-no-downgrade", "env-url"])
-def test_url_routes_preserve_images_and_prompts(monkeypatch, request_capture, route, combo, mode):
+def test_url_routes_preserve_images_and_prompts(
+    monkeypatch: pytest.MonkeyPatch, request_capture: list[dict[str, object]], route: str, mode: str,
+) -> None:
+    combo = False
     uploads = []
 
     def upload(path, data):
@@ -130,9 +132,10 @@ def test_url_routes_preserve_images_and_prompts(monkeypatch, request_capture, ro
 
 
 @pytest.mark.parametrize("route", ["image-generation", "chat"])
-@pytest.mark.parametrize("combo", [False, True])
 @pytest.mark.parametrize("failure", ["exception", "empty", "data", "relative"])
-def test_upload_failure_never_calls_model(monkeypatch, request_capture, route, combo, failure):
+def test_upload_failure_never_calls_model(
+    monkeypatch: pytest.MonkeyPatch, request_capture: list[dict[str, object]], route: str, failure: str,
+) -> None:
     monkeypatch.setenv("FD_OVERSEAS_GPU_GATEWAY", "https://gateway.example.com")
 
     def upload(*args):
@@ -142,15 +145,24 @@ def test_upload_failure_never_calls_model(monkeypatch, request_capture, route, c
 
     monkeypatch.setattr(image_payload, "upload_bytes_to_oss", upload)
     with pytest.raises(RuntimeError, match="OSS|HTTP"):
-        run_node(monkeypatch, route, combo)
+        run_node(monkeypatch, route, False)
     assert request_capture == []
 
 
 @pytest.mark.parametrize("route", ["image-generation", "chat"])
-@pytest.mark.parametrize("combo", [False, True])
-def test_domestic_default_keeps_existing_base64_contract(monkeypatch, request_capture, route, combo):
-    monkeypatch.setattr(image_payload, "upload_bytes_to_oss", lambda *a: pytest.fail("国内缺省不应上传"))
-    run_node(monkeypatch, route, combo)
+@pytest.mark.parametrize("combo, environment", [(False, "domestic"), (True, "domestic"),
+                                              (True, "overseas"), (True, "saved-url")])
+def test_base64_routes_preserve_images_and_prompts(
+    monkeypatch: pytest.MonkeyPatch, request_capture: list[dict[str, object]], route: str, combo: bool, environment: str,
+) -> None:
+    monkeypatch.setattr(image_payload, "upload_bytes_to_oss", lambda *a: pytest.fail("base64 不应上传"))
+    kwargs = {}
+    if environment in {"overseas", "saved-url"}:
+        monkeypatch.setenv("FD_OVERSEAS_GPU_GATEWAY", "https://gateway.example.com")
+        monkeypatch.setenv("FD_IMAGE_DELIVERY", "url")
+    if environment == "saved-url":
+        kwargs["image_delivery"] = "url"
+    run_node(monkeypatch, route, combo, **kwargs)
     body = request_capture[0]
     if route == "image-generation":
         key = "image_base64_list" if combo else "image_base64"

@@ -11,12 +11,7 @@ from .config import FD_DOUBAO_VISION_URL
 from .config_manager import load_config
 from .utils.error_utils import normalize_error_message
 from .utils.logging_utils import configure_default_logging
-from .utils.image_payload import (
-    IMAGE_DELIVERY_OPTIONS,
-    IMAGE_DELIVERY_URL,
-    image_delivery_input_config,
-    resolve_image_delivery,
-)
+from .utils.image_payload import IMAGE_DELIVERY_BASE64
 from .zhiyi_image_text_node import MAX_REQUEST_BODY_BYTES, ZhiYiImageTextNode
 
 configure_default_logging()
@@ -82,7 +77,6 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                     "default": "",
                     "multiline": True,
                 }),
-                "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
                 "model": (cls.MODELS, {"default": cls.MODEL}),
             },
         }
@@ -242,12 +236,9 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
 
     def _single_request_via_image_generation(
         self, vision_url, image_base64_list, text_prompt, retry_count, request_log,
-        image_delivery=None,
     ):
-        """走 image-generation 的多图 URL 或国内 base64 契约。
+        """走 image-generation 的多图 base64 契约。
         网络异常/5xx 按 retry_count 重试；INVALID_PARAMS 属参数问题不重试。"""
-        image_delivery = resolve_image_delivery(image_delivery)
-        image_key = "image_url_list" if image_delivery == IMAGE_DELIVERY_URL else "image_base64_list"
         max_attempts = max(1, int(retry_count) + 1)
         last_error = None
 
@@ -263,7 +254,7 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                         "Content-Type": "application/json",
                         "x-request-id": uuid.uuid4().hex[:16],
                     },
-                    json={image_key: image_base64_list, "text_prompt": text_prompt},
+                    json={"image_base64_list": image_base64_list, "text_prompt": text_prompt},
                     timeout=(5, 120),
                 )
                 status_code = response.status_code
@@ -361,9 +352,10 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
         if node_switch == 1:
             return ("", "node skipped")
 
-        image_delivery = resolve_image_delivery(image_delivery)
         if model not in self.MODELS:
             raise ValueError(f"不支持的图生文模型: {model}")
+        # 保留旧 API 参数的接收能力，所有模型统一使用 base64。
+        image_delivery = IMAGE_DELIVERY_BASE64
         cfg = load_config()
         base_url = cfg["base_url"].rstrip("/")
         api_key = cfg["api_key"]
@@ -410,9 +402,7 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                             "ZhiYi image-to-text combo encoded image (image-generation): %s",
                             image_info,
                         )
-                        image_refs.append(
-                            image_ref if image_delivery == IMAGE_DELIVERY_URL else image_ref.split(",", 1)[1]
-                        )
+                        image_refs.append(image_ref.split(",", 1)[1])
                     system_text = (system_prompt or "").strip()
                     text_prompt = f"{system_text}\n{prompt}" if system_text else prompt
                     tasks.append(
@@ -430,7 +420,6 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                                     "mode": "image-generation",
                                     "image_count": len(image_refs),
                                 },
-                                image_delivery,
                             ),
                         )
                     )
