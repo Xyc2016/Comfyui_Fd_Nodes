@@ -193,6 +193,8 @@ def test_gpt_nodes_keep_legacy_widget_order():
         "seed",
     ]
     assert list(combo_inputs["optional"])[-2:] == ["resize", "size_override"]
+    assert combo_inputs["optional"]["resize"][1]["default"] is False
+    assert inspect.signature(FD_GPTImageComboNode.generate).parameters["resize"].default is False
 
     assert list(multi_inputs["required"]) == [
         "image_1",

@@ -174,7 +174,7 @@ class FD_SeedreamImageComboNode:
             model=model,
             size=size,
             ratio=request_ratio,
-            resize=True,
+            resize=False,  # 固定关闭 IG 后置缩放，直接返回上游原图
         )
         image = bytesio_to_image_tensor(image_bytesio)
         return image, None, result_url

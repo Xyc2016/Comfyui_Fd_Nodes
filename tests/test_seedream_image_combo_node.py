@@ -88,7 +88,7 @@ def test_seedream_combo_single_request_posts_image_server_payload(monkeypatch):
         "prompt": "test prompt",
         "size": "2K",
         "ratio": "3:4",
-        "resize": True,
+        "resize": False,
         "image_url_list": ["https://example.com/input-1.png", "https://example.com/input-2.png"],
     }
     assert "seed" not in request_body
