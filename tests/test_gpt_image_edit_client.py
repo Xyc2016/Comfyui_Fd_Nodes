@@ -48,6 +48,10 @@ class DummyResponse:
     ("gpt-image-2.5-flare", "image_generation"),
     ("gpt-image-2.5-vip", "litellm"),
     ("gpt-image-2.5-vip", "image_generation"),
+    ("gpt-image-2.6-sunburst-siphonlab", "litellm"),
+    ("gpt-image-2.6-flare-siphonlab", "litellm"),
+    ("gpt-image-2.6-sunburst-siphonlab", "image_generation"),
+    ("gpt-image-2.6-flare-siphonlab", "image_generation"),
 ])
 def test_image_generation_edit_uploads_posts_and_downloads(monkeypatch, model, backend, quality):
     calls = []
@@ -186,7 +190,7 @@ def test_litellm_edit_preserves_model_size_quality_and_images(monkeypatch, model
             assert image.convert("RGB").getpixel((0, 0)) == (index * 255,) * 3
 
 
-@pytest.mark.parametrize("model", ["gpt-image-2", "gpt-image-2-primary", "gpt-image-2.5", "gpt-image-2.5-sunburst", "gpt-image-2.5-sunburst-siphonlab", "gpt-image-2.5-flare", "gpt-image-2.5-flare-siphonlab", "gpt-image-2.5-vip"])
+@pytest.mark.parametrize("model", ["gpt-image-2", "gpt-image-2-primary", "gpt-image-2.5", "gpt-image-2.5-sunburst", "gpt-image-2.5-sunburst-siphonlab", "gpt-image-2.5-flare", "gpt-image-2.5-flare-siphonlab", "gpt-image-2.5-vip", "gpt-image-2.6-sunburst-siphonlab", "gpt-image-2.6-flare-siphonlab"])
 def test_image_generation_edit_raises_error_message_on_status_false(model):
     channels = []
 

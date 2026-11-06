@@ -38,6 +38,8 @@ class GptImageEditClient:
         "gpt-image-2.5-flare",
         "gpt-image-2.5-flare-siphonlab",
         "gpt-image-2.5-vip",
+        "gpt-image-2.6-sunburst-siphonlab",
+        "gpt-image-2.6-flare-siphonlab",
     }
 
     def __init__(
