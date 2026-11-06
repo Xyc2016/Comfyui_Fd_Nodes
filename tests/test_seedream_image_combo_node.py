@@ -54,7 +54,7 @@ def test_seedream_combo_node_metadata():
     assert "combo_8" in input_types["optional"]
     assert "aspect_ratio" not in input_types["required"]
     assert input_types["optional"]["aspect_ratio"][0] == [
-        "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9", "9:21",
+        "auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9", "9:21",
     ]
     assert FD_SeedreamImageComboNode.RETURN_TYPES == ("IMAGE", "INT", "STRING")
     assert FD_SeedreamImageComboNode.RETURN_NAMES == ("image", "seed", "log")
@@ -92,6 +92,27 @@ def test_seedream_combo_single_request_posts_image_server_payload(monkeypatch):
         "image_url_list": ["https://example.com/input-1.png", "https://example.com/input-2.png"],
     }
     assert "seed" not in request_body
+
+
+def test_seedream_combo_auto_ratio_sends_empty_ratio_for_image_server_inference(monkeypatch):
+    node = FD_SeedreamImageComboNode()
+    captured = []
+    node._client = make_fake_client(captured=captured)
+    monkeypatch.setattr(seedream_combo_module, "bytesio_to_image_tensor", lambda _image_bytesio: "fake-image")
+
+    node._single_request(
+        model="doubao-seedream-5.0-flash",
+        prompt="test prompt",
+        image_urls=["https://example.com/input-1.png", "https://example.com/input-2.png"],
+        size="2K",
+        seed=123,
+        aspect_ratio="auto",
+    )
+
+    request_body = captured[0][2]
+    assert request_body["ratio"] == ""
+    assert request_body["size"] == "2K"
+    assert request_body["image_url_list"][0] == "https://example.com/input-1.png"
 
 
 def test_seedream_combo_single_request_maps_3k_to_2k(monkeypatch):

@@ -29,7 +29,8 @@ class FD_SeedreamImageComboNode:
 
     MODELS = ["doubao-seedream-5.0-lite", "doubao-seedream-5.0-pro", "doubao-seedream-5.0-flash"]
     IMAGE_SIZES = SEEDREAM_IMAGE_SIZES
-    ASPECT_RATIOS = SEEDREAM_ASPECT_RATIOS
+    AUTO_ASPECT_RATIO = "auto"
+    ASPECT_RATIOS = [AUTO_ASPECT_RATIO, *SEEDREAM_ASPECT_RATIOS]
     OUTPUT_FORMATS = ["png", "jpg"]
     SEED_MODES = ["随机种子", "固定种子"]
 
@@ -79,7 +80,7 @@ class FD_SeedreamImageComboNode:
                 }),
                 "aspect_ratio": (cls.ASPECT_RATIOS, {
                     "default": "1:1",
-                    "tooltip": "Output aspect ratio. Converted to a Seedream pixel size before request.",
+                    "tooltip": "Output aspect ratio. auto: image-server 按本次请求第一张输入图的比例选最接近的支持比例。",
                 }),
             },
         }
@@ -162,6 +163,8 @@ class FD_SeedreamImageComboNode:
         if not image_urls:
             raise RuntimeError("未提供图片 URL")
 
+        # auto 不是 Seedream/image-server 的合法比例：传空 ratio，由 image-server 下载首张输入图推断最接近的比例。
+        request_ratio = "" if aspect_ratio == self.AUTO_ASPECT_RATIO else aspect_ratio
         log_payload = self._summarize_request_for_log(model, prompt.strip(), size, aspect_ratio, len(image_urls), seed)
         logger.info("Calling Seedream combo API with payload=%s", log_payload)
 
@@ -170,7 +173,7 @@ class FD_SeedreamImageComboNode:
             prompt=prompt.strip(),
             model=model,
             size=size,
-            ratio=aspect_ratio,
+            ratio=request_ratio,
             resize=True,
         )
         image = bytesio_to_image_tensor(image_bytesio)
