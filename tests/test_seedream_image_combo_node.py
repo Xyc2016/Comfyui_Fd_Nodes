@@ -56,6 +56,9 @@ def test_seedream_combo_node_metadata():
     assert input_types["optional"]["aspect_ratio"][0] == [
         "auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "16:9", "9:16", "21:9", "9:21",
     ]
+    assert list(input_types["optional"])[-2:] == ["aspect_ratio", "resize"]
+    assert input_types["optional"]["resize"][0] == "BOOLEAN"
+    assert input_types["optional"]["resize"][1]["default"] is True
     assert FD_SeedreamImageComboNode.RETURN_TYPES == ("IMAGE", "INT", "STRING")
     assert FD_SeedreamImageComboNode.RETURN_NAMES == ("image", "seed", "log")
     assert FD_SeedreamImageComboNode.OUTPUT_IS_LIST == (True, False, False)
@@ -88,7 +91,7 @@ def test_seedream_combo_single_request_posts_image_server_payload(monkeypatch):
         "prompt": "test prompt",
         "size": "2K",
         "ratio": "3:4",
-        "resize": False,
+        "resize": True,
         "image_url_list": ["https://example.com/input-1.png", "https://example.com/input-2.png"],
     }
     assert "seed" not in request_body
@@ -113,6 +116,20 @@ def test_seedream_combo_auto_ratio_sends_empty_ratio_for_image_server_inference(
     assert request_body["ratio"] == ""
     assert request_body["size"] == "2K"
     assert request_body["image_url_list"][0] == "https://example.com/input-1.png"
+
+
+def test_seedream_combo_resize_option_is_sent_to_image_server(monkeypatch):
+    node = FD_SeedreamImageComboNode()
+    captured = []
+    node._client = make_fake_client(captured=captured)
+    monkeypatch.setattr(seedream_combo_module, "bytesio_to_image_tensor", lambda _image_bytesio: "fake-image")
+
+    for resize in (False, True):
+        node._single_request(
+            model="doubao-seedream-5.0-pro", prompt="p", image_urls=["https://example.com/a.png"],
+            size="2K", seed=1, aspect_ratio="3:4", resize=resize,
+        )
+    assert [c[2]["resize"] for c in captured] == [False, True]
 
 
 def test_seedream_combo_single_request_maps_3k_to_2k(monkeypatch):
@@ -160,6 +177,7 @@ def test_seedream_combo_generate_reuses_uploaded_urls_and_keeps_combo_shape(monk
         combo_1=combo,
         system_prompt="system",
         aspect_ratio="16:9",
+        resize=False,
     )
 
     assert images == ["image-1", "image-2"]
@@ -177,6 +195,8 @@ def test_seedream_combo_generate_reuses_uploaded_urls_and_keeps_combo_shape(monk
     assert second_args[1] == "system\n\nprompt two"
     assert second_args[4] == 11
     assert second_args[5] == "16:9"
+    assert first_args[6] is False
+    assert second_args[6] is False
 
 
 def test_seedream_combo_generate_rejects_missing_combo():

@@ -82,6 +82,10 @@ class FD_SeedreamImageComboNode:
                     "default": "1:1",
                     "tooltip": "Output aspect ratio. auto: image-server 按本次请求第一张输入图的比例选最接近的支持比例。",
                 }),
+                "resize": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "是否让 image-generation 对结果做后置 resize（长边按档位缩放到 1K/2K/4K）。关闭时直接返回上游原图。追加在 optional 末尾以兼容旧 workflow 的 widget 顺序。",
+                }),
             },
         }
 
@@ -157,7 +161,7 @@ class FD_SeedreamImageComboNode:
             "note": "seed 仅用于批量任务记录，Seedream 请求体当前不传 seed 字段",
         }
 
-    def _single_request(self, model, prompt, image_urls, size, seed, aspect_ratio="1:1"):
+    def _single_request(self, model, prompt, image_urls, size, seed, aspect_ratio="1:1", resize=True):
         if not prompt or not prompt.strip():
             raise RuntimeError("prompt 不能为空")
         if not image_urls:
@@ -174,7 +178,7 @@ class FD_SeedreamImageComboNode:
             model=model,
             size=size,
             ratio=request_ratio,
-            resize=False,  # 固定关闭 IG 后置缩放，直接返回上游原图
+            resize=bool(resize),
         )
         image = bytesio_to_image_tensor(image_bytesio)
         return image, None, result_url
@@ -213,7 +217,7 @@ class FD_SeedreamImageComboNode:
                  batch_size=1, max_concurrency=16, seed_mode="随机种子", seed=0,
                  combo_1=None, combo_2=None, combo_3=None, combo_4=None,
                  combo_5=None, combo_6=None, combo_7=None, combo_8=None,
-                 system_prompt="", aspect_ratio="1:1"):
+                 system_prompt="", aspect_ratio="1:1", resize=True):
         actual_seed = random.randint(0, 2147483647) if seed_mode == "随机种子" else seed
 
         combos = [c for c in [combo_1, combo_2, combo_3, combo_4, combo_5, combo_6, combo_7, combo_8] if c is not None]
@@ -262,6 +266,7 @@ class FD_SeedreamImageComboNode:
                                 size,
                                 task_seed,
                                 aspect_ratio,
+                                resize,
                             ),
                         ))
                         task_idx += 1
