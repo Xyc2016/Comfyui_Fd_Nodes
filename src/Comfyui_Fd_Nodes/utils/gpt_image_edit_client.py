@@ -35,6 +35,7 @@ class GptImageEditClient:
         "gpt-image-2.5",
         "gpt-image-2.5-sunburst",
         "gpt-image-2.5-sunburst-siphonlab",
+        "gpt-image-2.5-sunburst-for-pattern",
         "gpt-image-2.5-flare",
         "gpt-image-2.5-flare-siphonlab",
         "gpt-image-2.5-vip",

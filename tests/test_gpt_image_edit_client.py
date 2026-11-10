@@ -39,6 +39,8 @@ class DummyResponse:
     ("gpt-image-2.5", "image_generation"),
     ("gpt-image-2.5", "litellm"),
     ("gpt-image-2.5-sunburst-siphonlab", "litellm"),
+    ("gpt-image-2.5-sunburst-for-pattern", "litellm"),
+    ("gpt-image-2.5-sunburst-for-pattern", "image_generation"),
     ("gpt-image-2.5-flare-siphonlab", "litellm"),
     ("gpt-image-2.5-sunburst-siphonlab", "image_generation"),
     ("gpt-image-2.5-flare-siphonlab", "image_generation"),

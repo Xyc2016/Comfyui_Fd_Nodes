@@ -227,7 +227,11 @@ GPT_IMAGE_MODELS = [
 def test_gpt_nodes_model_options_and_default(node_class):
     model_type, model_config = node_class.INPUT_TYPES()["required"]["model"]
     options = model_config["options"] if node_class is FD_GTPImage else model_type
-    assert options == GPT_IMAGE_MODELS
+    expected = list(GPT_IMAGE_MODELS)
+    if node_class is FD_GPTImageComboNode:
+        expected.insert(expected.index("gpt-image-2.5-sunburst-siphonlab") + 1,
+                        "gpt-image-2.5-sunburst-for-pattern")
+    assert options == expected
     assert model_config["default"] == "gpt-image-2"
 
 
