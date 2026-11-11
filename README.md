@@ -104,14 +104,29 @@ You need to make an account on https://registry.comfy.org and create an API key 
 
 A Github action will run on every git push. You can also run the Github action manually. Full instructions [here](https://docs.comfy.org/registry/publishing). Join our [discord](https://discord.com/invite/comfyorg) if you have any questions!
 
-# 图生文 Combo 模型
+# 图生文模型
 
-`知衣-图生文-combo`（`ZhiYiImageTextComboNode`）从 53.8.76 起可在末尾的
-`model` 下拉框选择 `qwen3.7-plus`。从 53.8.77 起默认使用 `qwen3.7-plus`，未填写
-`model` 的旧 API 工作流也使用该默认值；豆包仍可手动选择。Qwen 直接调用 `FD_LITELLM_BASE_URL` 的 Chat Completions，
-不经过 `FD_DOUBAO_VISION_URL`；保留多图、system_prompt、temperature、max_tokens、
+以下三个节点统一由专用环境变量 `FD_IMAGE_TEXT_PROVIDER` 选择模型，启动时读取，修改后需重启：
+
+- `FD_imgToText_Doubao`（保留旧节点名、URL 输入和失败时返回 `defaultPrompt` 的行为）
+- `ZhiYiImageTextNode`
+- `ZhiYiImageTextComboNode`
+
+| 配置 | 模型 |
+|---|---|
+| 不配置或 `FD_IMAGE_TEXT_PROVIDER=qwen` | `qwen3.7-plus`（默认） |
+| `FD_IMAGE_TEXT_PROVIDER=doubao` | `doubao-seed-2.0-mini` |
+
+其他值会在启动时明确报错。该开关独立于 `FD_COMFY_RUNTIME_ENV`、`FD_IMAGE_DELIVERY`、
+`FD_GPT_IMAGE_BACKEND` 等配置，服务地址也不参与模型选择。Combo 的 `model` 控件仅保留
+用于兼容旧工作流，执行时由环境变量覆盖，其默认显示值跟随上述配置。
+
+Qwen 直接调用 `FD_LITELLM_BASE_URL` 的 Chat Completions，使用 `FD_LITELLM_API_KEY`，
+不经过 `FD_DOUBAO_URL` 或 `FD_DOUBAO_VISION_URL`，失败也不自动切回豆包。
+豆包保留原有入口：旧节点走 `FD_DOUBAO_URL`；单图/Combo 配置了 `FD_DOUBAO_VISION_URL`
+时走 image-generation，否则直连 LiteLLM。保留多图、system_prompt、temperature、max_tokens、
 并发和重试设置。从 53.8.79 起，该 Combo 节点在国内外统一压缩 JPEG 后传 base64，
-移除 URL 传图选项，不受海外通用 URL 门控覆盖；豆包可选模型同样使用 base64。
+移除 URL 传图选项，不受海外通用 URL 门控覆盖；配置为豆包时同样使用 base64。
 旧 API 中的 `image_delivery` 字段不再改变传图方式，UI 自动迁移旧工作流的控件顺序。
 使用前须确认所在 LiteLLM 网关和调用 Key 已提供 `qwen3.7-plus`。
 从 53.8.78 起，Qwen 请求固定发送 `enable_thinking=false`，避免短图片理解任务长时间思考。

@@ -1,9 +1,14 @@
+from __future__ import annotations
+
 import json
 import re
 import time
 
 import requests
 
+from . import config
+from .config_manager import load_config
+from .zhiyi_image_text_node import ZhiYiImageTextNode
 from .utils.common_util import bytes_calculate_hex_md5, pil2iobyte, tensor2pil
 from .config import (
     FD_DOUBAO_KEY,
@@ -117,7 +122,7 @@ class FD_BinaryDecisionNormalizer:
 
 
 class FD_imgToText_Doubao:
-    # 调用豆包的图生文节点
+    # 保留旧节点名和输入输出，由 FD_IMAGE_TEXT_PROVIDER 选择 Qwen 或豆包。
     def __init__(self):
         pass
 
@@ -138,9 +143,29 @@ class FD_imgToText_Doubao:
     OUTPUT_NODE = False
     CATEGORY = "image/captioning"
 
-    def gen(self, image_url, prompt, defaultPrompt):
+    def gen(self, image_url: str, prompt: str, defaultPrompt: str) -> tuple[str]:
         if is_url_delivery_required():
             require_http_image_url(image_url)
+        if config.FD_IMAGE_TEXT_PROVIDER == "qwen":
+            try:
+                cfg = load_config()
+                node = ZhiYiImageTextNode()
+                messages = node._build_messages(prompt, [image_url])
+                payload = node._build_request_payload(messages, 0.7, 2048)
+                response = requests.post(
+                    f"{cfg['base_url'].rstrip('/')}/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {cfg['api_key']}", "Content-Type": "application/json"},
+                    json=payload,
+                    timeout=(5, 120),
+                )
+                response.raise_for_status()
+                text = response.json()["choices"][0]["message"]["content"]
+                if isinstance(text, list):
+                    text = "".join(part.get("text", "") for part in text if isinstance(part, dict))
+                return (text,)
+            except Exception as exc:
+                print(f"FD_imgToText_Doubao Qwen request failed: {exc}")
+                return (defaultPrompt,)
         headers = {"Content-Type": "application/json"}
         if FD_DOUBAO_KEY:
             headers["Authorization"] = "Bearer " + FD_DOUBAO_KEY

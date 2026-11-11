@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import requests
 import json
 import base64
@@ -6,6 +8,8 @@ import uuid
 import numpy as np
 from PIL import Image
 import io
+from typing import Any
+from . import config
 from .config import FD_DOUBAO_VISION_URL
 from .config_manager import load_config
 from .utils.logging_utils import configure_default_logging
@@ -29,7 +33,7 @@ IMAGE_RESIZE_FACTOR = 0.8
 
 
 class ZhiYiImageTextNode:
-    """知衣图生文节点 - 传入图片，调用 Gemini 模型生成描述文本"""
+    """知衣图生文节点，由专用环境变量选择 Qwen 或豆包。"""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -203,14 +207,19 @@ class ZhiYiImageTextNode:
         })
         return messages
 
-    def _build_request_payload(self, messages, temperature, max_tokens):
-        return {
+    def _build_request_payload(
+        self, messages: list[dict[str, Any]], temperature: float, max_tokens: int,
+    ) -> dict[str, Any]:
+        payload = {
             "stream": False,
-            "model": "doubao-seed-2.0-mini",
+            "model": config.FD_IMAGE_TEXT_MODEL,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if config.FD_IMAGE_TEXT_PROVIDER == "qwen":
+            payload["enable_thinking"] = False
+        return payload
 
     def _serialize_request_body(self, payload, allow_over_budget=False):
         request_body = json.dumps(payload)
@@ -327,7 +336,7 @@ class ZhiYiImageTextNode:
             return ("",)
 
         image_delivery = resolve_image_delivery(image_delivery)
-        if FD_DOUBAO_VISION_URL:
+        if config.FD_IMAGE_TEXT_PROVIDER == "doubao" and FD_DOUBAO_VISION_URL:
             return self._generate_via_image_generation(image, prompt, system_prompt, image_delivery)
 
         cfg = load_config()

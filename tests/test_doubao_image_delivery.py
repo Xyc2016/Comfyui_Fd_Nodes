@@ -16,6 +16,8 @@ from src.Comfyui_Fd_Nodes.utils import image_payload
 
 @pytest.fixture(autouse=True)
 def domestic_environment(monkeypatch):
+    monkeypatch.setattr(single_module.config, "FD_IMAGE_TEXT_PROVIDER", "doubao")
+    monkeypatch.setattr(single_module.config, "FD_IMAGE_TEXT_MODEL", "doubao-seed-2.0-mini")
     monkeypatch.delenv("FD_OVERSEAS_GPU_GATEWAY", raising=False)
     monkeypatch.delenv("FD_IMAGE_DELIVERY", raising=False)
 

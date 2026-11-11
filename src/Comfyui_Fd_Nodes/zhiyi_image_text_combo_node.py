@@ -3,10 +3,10 @@ import time
 import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
 
 import requests
 
+from . import config
 from .config import FD_DOUBAO_VISION_URL
 from .config_manager import load_config
 from .utils.error_utils import normalize_error_message
@@ -77,7 +77,10 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                     "default": "",
                     "multiline": True,
                 }),
-                "model": (cls.MODELS, {"default": cls.MODEL}),
+                "model": (cls.MODELS, {
+                    "default": config.FD_IMAGE_TEXT_MODEL,
+                    "tooltip": "旧工作流兼容字段；实际模型由 FD_IMAGE_TEXT_PROVIDER 环境变量统一决定",
+                }),
             },
         }
 
@@ -86,16 +89,6 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
     FUNCTION = "generate"
     CATEGORY = "知衣/图生文"
     OUTPUT_NODE = False
-
-    def _build_request_payload(
-        self, messages: list[dict[str, Any]], temperature: float, max_tokens: int,
-        model: str = MODEL,
-    ) -> dict[str, Any]:
-        payload = super()._build_request_payload(messages, temperature, max_tokens)
-        payload["model"] = model
-        if model == self.MODEL:
-            payload["enable_thinking"] = False
-        return payload
 
     def _expand_images(self, combo_images):
         result = []
@@ -352,8 +345,8 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
         if node_switch == 1:
             return ("", "node skipped")
 
-        if model not in self.MODELS:
-            raise ValueError(f"不支持的图生文模型: {model}")
+        # 接收旧工作流的 model 字段，但不允许它覆盖部署专用开关。
+        model = config.FD_IMAGE_TEXT_MODEL
         # 保留旧 API 参数的接收能力，所有模型统一使用 base64。
         image_delivery = IMAGE_DELIVERY_BASE64
         cfg = load_config()
@@ -391,7 +384,7 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                     raise RuntimeError("无有效图片")
 
                 prompt = self._select_prompt(combo)
-                if model == self.DOUBAO_MODEL and FD_DOUBAO_VISION_URL:
+                if config.FD_IMAGE_TEXT_PROVIDER == "doubao" and FD_DOUBAO_VISION_URL:
                     image_refs = []
                     for image in expanded_images:
                         image_ref, image_info = self._prepare_image_reference(
@@ -428,7 +421,7 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                     prompt, [""] * len(expanded_images), system_prompt
                 )
                 placeholder_payload = self._build_request_payload(
-                    placeholder_messages, temperature, max_tokens, model
+                    placeholder_messages, temperature, max_tokens
                 )
                 image_budget = self._image_budget(
                     placeholder_payload, len(expanded_images)
@@ -444,7 +437,7 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                     image_infos.append(image_info)
 
                 messages = self._build_messages(prompt, data_urls, system_prompt)
-                payload = self._build_request_payload(messages, temperature, max_tokens, model)
+                payload = self._build_request_payload(messages, temperature, max_tokens)
                 request_body, request_body_bytes = self._serialize_request_body(
                     payload,
                     allow_over_budget=any(

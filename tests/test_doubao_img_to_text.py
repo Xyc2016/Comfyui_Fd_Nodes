@@ -26,6 +26,12 @@ for mod_name, attrs in (
 from Comfyui_Fd_Nodes import old_fd_nodes  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def doubao_provider(monkeypatch):
+    monkeypatch.setattr(old_fd_nodes.config, "FD_IMAGE_TEXT_PROVIDER", "doubao")
+    monkeypatch.setattr(old_fd_nodes.config, "FD_IMAGE_TEXT_MODEL", "doubao-seed-2.0-mini")
+
+
 class _Resp:
     def __init__(self, payload):
         self.content = json.dumps(payload).encode()

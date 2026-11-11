@@ -29,10 +29,17 @@ FD_LITELLM_BASE_URL = os.getenv("FD_LITELLM_BASE_URL")
 FD_LITELLM_API_KEY = os.getenv("FD_LITELLM_API_KEY")
 FD_GPT_IMAGE_BACKEND = os.getenv("FD_GPT_IMAGE_BACKEND", "image_generation")
 
-# 图生文（豆包视觉）统一走 image-generation 的 /image/image_to_text_doubao：
-# 配置 FD_DOUBAO_VISION_URL 后，单图节点用 image_base64、combo 多图节点用
-# image_base64_list 调用该接口；服务端自适应国内外模型名写法（点号/横线），
-# 下游无需关心。未配置时保持直连 LiteLLM 的原逻辑（国内现状不受影响）。
+# 三个图生文节点共用的独立模型开关，与运行环境、传图方式及服务地址无关。
+FD_IMAGE_TEXT_PROVIDER = os.getenv("FD_IMAGE_TEXT_PROVIDER", "qwen")
+if FD_IMAGE_TEXT_PROVIDER not in ("qwen", "doubao"):
+    raise ValueError("FD_IMAGE_TEXT_PROVIDER must be qwen or doubao")
+FD_IMAGE_TEXT_MODEL = {
+    "qwen": "qwen3.7-plus",
+    "doubao": "doubao-seed-2.0-mini",
+}[FD_IMAGE_TEXT_PROVIDER]
+
+# 仅选择豆包时使用该 image-generation 入口；未配置则直连 LiteLLM。
+# 单图沿用配置的 URL/base64 传图方式，Combo 固定 image_base64_list。
 FD_DOUBAO_VISION_URL = os.getenv("FD_DOUBAO_VISION_URL", "").strip()
 
 

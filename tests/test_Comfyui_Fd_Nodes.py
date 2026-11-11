@@ -1786,7 +1786,8 @@ def test_zhiyi_image_text_request_logs_request_and_response_without_images(monke
 
     assert result == ("hello",)
     request_payload = next(value for key, value in captured_logs if key == "post_payload")
-    assert request_payload["model"] == "doubao-seed-2.0-mini"
+    assert request_payload["model"] == "qwen3.7-plus"
+    assert request_payload["enable_thinking"] is False
     assert request_payload["messages"][1]["content"][1]["image_url"]["url"] == "data:image/jpeg;base64,AAA"
     request_log = next(args[0] for message, args in captured_logs if message == "Calling ZhiYi image-to-text API with payload=%s")
     assert request_log["messages"] == [

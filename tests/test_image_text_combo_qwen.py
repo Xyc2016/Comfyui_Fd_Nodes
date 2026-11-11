@@ -74,13 +74,20 @@ def test_model_widget_is_appended_after_existing_widgets(monkeypatch: pytest.Mon
     fields = module.ZhiYiImageTextComboNode.INPUT_TYPES()
     assert "image_delivery" not in fields["optional"]
     assert list(fields["optional"])[-1] == "model"
-    assert fields["optional"]["model"] == (["qwen3.7-plus", "doubao-seed-2.0-mini"], {"default": "qwen3.7-plus"})
+    models, options = fields["optional"]["model"]
+    assert models == ["qwen3.7-plus", "doubao-seed-2.0-mini"]
+    assert options["default"] == "qwen3.7-plus"
+    assert "FD_IMAGE_TEXT_PROVIDER" in options["tooltip"]
 
 
-def test_qwen_payload_does_not_change_subsequent_default_request():
+def test_qwen_payload_does_not_change_subsequent_default_request(monkeypatch):
     node = module.ZhiYiImageTextComboNode()
     messages = [{"role": "user", "content": []}]
-    doubao_payload = node._build_request_payload(messages, 0.7, 100, "doubao-seed-2.0-mini")
+    monkeypatch.setattr(module.config, "FD_IMAGE_TEXT_PROVIDER", "doubao")
+    monkeypatch.setattr(module.config, "FD_IMAGE_TEXT_MODEL", "doubao-seed-2.0-mini")
+    doubao_payload = node._build_request_payload(messages, 0.7, 100)
     assert doubao_payload["model"] == "doubao-seed-2.0-mini"
     assert "enable_thinking" not in doubao_payload
+    monkeypatch.setattr(module.config, "FD_IMAGE_TEXT_PROVIDER", "qwen")
+    monkeypatch.setattr(module.config, "FD_IMAGE_TEXT_MODEL", "qwen3.7-plus")
     assert node._build_request_payload(messages, 0.7, 100)["model"] == "qwen3.7-plus"

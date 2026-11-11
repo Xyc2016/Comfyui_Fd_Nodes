@@ -18,7 +18,6 @@ if "torch" not in sys.modules:
     sys.modules["torch"] = fake_torch
 
 import numpy as np  # noqa: E402
-from PIL import Image  # noqa: E402
 
 from Comfyui_Fd_Nodes import (  # noqa: E402
     zhiyi_image_text_combo_node as combo_mod,
@@ -67,6 +66,12 @@ class _Resp:
 
 
 VISION_URL = "http://image-generation.gray.svc.cluster.local:8207/image/image_to_text_doubao"
+
+
+@pytest.fixture(autouse=True)
+def doubao_provider(monkeypatch):
+    monkeypatch.setattr(single_mod.config, "FD_IMAGE_TEXT_PROVIDER", "doubao")
+    monkeypatch.setattr(single_mod.config, "FD_IMAGE_TEXT_MODEL", "doubao-seed-2.0-mini")
 
 
 def test_single_image_via_vision_url():
