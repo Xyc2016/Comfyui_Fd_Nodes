@@ -19,7 +19,6 @@ from .config import (
     FD_DWPOSE_API_KEY,
     FD_FASHION_SEGMENT_URL,
     FD_COMFY_RUNTIME_ENV,
-    RMBG_DEFAULT_IMAGE_ENCODING,
     RMBG_RUNTIME_URL,
     RMBG_SERVICE_URL_PRESETS,
 )
@@ -32,7 +31,6 @@ from .utils.image_payload import (
     tensor_to_image_payload,
 )
 from .utils.logging_utils import configure_default_logging
-from .utils.rmbg_image_payload import tensor_to_jpeg_q95_payload
 from .utils.service_url import resolve_service_url_preset, service_url_preset_options
 
 configure_default_logging()
@@ -44,21 +42,7 @@ DEFAULT_CLOTHES_SEGMENT_URL = "http://10.1.0.230:8003/v1/segment/clothes"
 DEFAULT_FASHION_SEGMENT_URL = "http://10.1.0.230:8003/v1/segment/fashion"
 DEFAULT_BODY_SEGMENT_URL = "http://10.1.0.230:8003/v1/segment/body"
 BACKGROUND_MODES = ["Alpha", "Color"]
-RMBG_IMAGE_ENCODINGS = ["png", "jpeg_q95"]
-RMBG_IMAGE_ENCODING_CONFIG = {
-    "default": RMBG_DEFAULT_IMAGE_ENCODING,
-    "tooltip": "传输质量：png 无损；jpeg_q95 节省流量。未精修时用原始 RGB 合成，精修时保留远端图片。",
-}
 
-
-def _response_size(result: dict, field: str) -> tuple[int, int]:
-    value = result.get(field)
-    if not isinstance(value, dict):
-        raise RuntimeError(f"RMBG mask 响应缺少 {field} 尺寸")
-    size = (value.get("width"), value.get("height"))
-    if any(type(dimension) is not int or dimension <= 0 for dimension in size):
-        raise RuntimeError(f"RMBG mask 响应 {field} 尺寸无效: {value}")
-    return size
 
 CLOTHES_CLASSES = [
     "Background",
@@ -260,27 +244,6 @@ class _RmbgSegmentApiBase:
             mask_image = mask_image.resize(size, Image.Resampling.BILINEAR)
         mask_array = np.array(mask_image).astype(np.float32) / 255.0
         return torch.from_numpy(np.clip(mask_array, 0.0, 1.0).astype(np.float32)).unsqueeze(0)
-
-    def _rmbg_mask_only_to_tensor(self, result: dict, source_size: tuple[int, int]) -> torch.Tensor:
-        """Validate the native mask before restoring the service's inference size."""
-        mask_image = self._decode_png_data_url(result.get("mask"), "mask")
-        if mask_image.format != "PNG" or mask_image.mode != "L":
-            raise RuntimeError("RMBG mask 必须为 8 位灰度 PNG")
-        image_size = _response_size(result, "image_size")
-        inference_size = _response_size(result, "inference_size")
-        output_size = _response_size(result, "output_size")
-        if image_size != source_size:
-            raise RuntimeError(f"RMBG image_size 与原图尺寸不匹配: {image_size} != {source_size}")
-        if mask_image.size != output_size or output_size not in (source_size, inference_size):
-            raise RuntimeError(
-                f"RMBG mask 尺寸异常: mask={mask_image.size}, output_size={output_size}, "
-                f"image_size={image_size}, inference_size={inference_size}"
-            )
-        if result.get("processed_image") or result.get("mask_image"):
-            raise RuntimeError("RMBG 服务未遵守仅返回 mask 的请求，仍返回 processed_image 或 mask_image")
-        if mask_image.size != source_size:
-            mask_image = mask_image.resize(source_size, Image.Resampling.BILINEAR)
-        return torch.from_numpy(np.array(mask_image).astype(np.float32) / 255.0).unsqueeze(0)
 
     def _empty_mask_tensor(self, size):
         width, height = size
@@ -506,11 +469,7 @@ class _RmbgSegmentApiBase:
         self, idx, image_tensor, service_url, payload_params, timeout, image_delivery=IMAGE_DELIVERY_BASE64
     ):
         original_image = self._image_tensor_to_rgb_pil(image_tensor)
-        image_payload = (
-            tensor_to_jpeg_q95_payload(image_tensor, image_delivery)
-            if payload_params["image_encoding"] == "jpeg_q95"
-            else tensor_to_image_payload(image_tensor, image_delivery)
-        )
+        image_payload = tensor_to_image_payload(image_tensor, image_delivery)
         payload = self._build_common_payload(
             image_payload,
             payload_params["process_res"],
@@ -526,17 +485,12 @@ class _RmbgSegmentApiBase:
         payload.update(payload_params["extra"])
 
         label = payload_params["label"]
-        logger.info(
-            "Calling %s API idx=%s service_url=%s image_encoding=%s mask_only_response=%s",
-            label, idx, service_url, payload_params["image_encoding"], payload_params["mask_only_response"],
-        )
+        logger.info("Calling %s API idx=%s service_url=%s", label, idx, service_url)
         result = self._post_process(service_url, payload, timeout, label)
 
         if payload_params["is_rmbg"] and not result.get("mask"):
             raise RuntimeError("RMBG 响应缺少 mask")
-        if payload_params["mask_only_response"]:
-            mask = self._rmbg_mask_only_to_tensor(result, original_image.size)
-        elif result.get("mask"):
+        if result.get("mask"):
             mask = self._mask_data_url_to_tensor(result["mask"], original_image.size)
         else:
             mask = self._empty_mask_tensor(original_image.size)
@@ -549,12 +503,6 @@ class _RmbgSegmentApiBase:
             mode = "RGBA" if payload_params["background"] == "Alpha" else "RGB"
             pixels = np.asarray(processed_image.convert(mode), dtype=np.float32) / 255.0
             result_image = torch.from_numpy(pixels.copy()).unsqueeze(0)
-        elif payload_params["mask_only_response"] and payload_params["background"] == "Alpha":
-            # Match the legacy returned-PNG conversion, including 8-bit alpha rounding.
-            rgba = original_image.convert("RGBA")
-            alpha = np.rint(mask[0].detach().cpu().numpy() * 255.0).clip(0, 255).astype(np.uint8)
-            rgba.putalpha(Image.fromarray(alpha))
-            result_image = self._pil_to_image_tensor(rgba)
         elif result.get("mask"):
             result_image = self._compose_output_image(
                 image_tensor,
@@ -626,7 +574,6 @@ class _RmbgSegmentApiBase:
         extra,
         info_extra,
         image_delivery=IMAGE_DELIVERY_BASE64,
-        image_encoding: str = "png",
     ):
         if node_switch == 1:
             image_batch = self._normalize_image_batch(image)
@@ -644,11 +591,8 @@ class _RmbgSegmentApiBase:
             RMBG_SERVICE_URL_PRESETS,
         )
         final_service_url = _normalize_rmbg_segment_url(selected_service_url, default_url, endpoint)
-        mask_only_response = endpoint == "rmbg" and not extra.get("refine_foreground", False)
-        if image_encoding not in RMBG_IMAGE_ENCODINGS:
-            raise ValueError(f"不支持的传输质量: {image_encoding}")
         if endpoint == "rmbg":
-            return_image, return_mask, return_mask_image = not mask_only_response, True, False
+            return_image, return_mask, return_mask_image = True, True, False
         image_tensors = self._expand_images(image)
         if not image_tensors:
             raise RuntimeError("未提供图片")
@@ -666,9 +610,7 @@ class _RmbgSegmentApiBase:
             "return_image": return_image,
             "return_mask": return_mask,
             "return_mask_image": return_mask_image,
-            "mask_only_response": mask_only_response,
             "is_rmbg": endpoint == "rmbg",
-            "image_encoding": image_encoding,
             "extra": extra,
         }
         tasks = []
@@ -678,14 +620,12 @@ class _RmbgSegmentApiBase:
                 (idx, image_tensor, final_service_url, payload_params, timeout, image_delivery),
             ))
 
-        print(f"[{label}] 处理 {len(tasks)} 张图片，并发上限 {max_concurrency}, "
-              f"image_encoding={image_encoding}, mask_only_response={mask_only_response}")
+        print(f"[{label}] 处理 {len(tasks)} 张图片，并发上限 {max_concurrency}")
         results = self._run_concurrent(tasks, max_concurrency, label)
         info = {
             "service_url": final_service_url,
             "endpoint": f"/v1/{endpoint}",
             "image_delivery": image_delivery,
-            "image_encoding": image_encoding,
             "process_res": int(process_res),
             "mask_blur": int(mask_blur),
             "mask_offset": int(mask_offset),
@@ -695,7 +635,6 @@ class _RmbgSegmentApiBase:
             "return_image": bool(return_image),
             "return_mask": bool(return_mask),
             "return_mask_image": bool(return_mask_image),
-            "mask_only_response": mask_only_response,
             **info_extra,
             "items": [result["info"] for result in results],
         }
@@ -730,7 +669,6 @@ class ZhiYiRMBGNode(_RmbgSegmentApiBase):
                 "health_check": ("BOOLEAN", {"default": False}),
                 "node_switch": ("INT", {"default": 0, "min": 0, "max": 1, "step": 1}),
                 "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
-                "image_encoding": (RMBG_IMAGE_ENCODINGS, RMBG_IMAGE_ENCODING_CONFIG),
             },
         }
 
@@ -756,7 +694,6 @@ class ZhiYiRMBGNode(_RmbgSegmentApiBase):
         health_check: bool = False,
         node_switch: int = 0,
         image_delivery: str = IMAGE_DELIVERY_BASE64,
-        image_encoding: str = RMBG_DEFAULT_IMAGE_ENCODING,
         **legacy_inputs: object,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, str]:
         # Old API graphs may still contain routing/return fields; deployment wins.
@@ -773,7 +710,7 @@ class ZhiYiRMBGNode(_RmbgSegmentApiBase):
             invert_output=invert_output,
             background=background,
             background_color=background_color,
-            return_image=bool(refine_foreground),
+            return_image=True,
             return_mask=True,
             return_mask_image=False,
             max_concurrency=max_concurrency,
@@ -782,7 +719,6 @@ class ZhiYiRMBGNode(_RmbgSegmentApiBase):
             node_switch=node_switch,
             service_url_preset=CUSTOM_SERVICE_URL_PRESET,
             image_delivery=image_delivery,
-            image_encoding=image_encoding,
             extra={"sensitivity": float(sensitivity), "refine_foreground": bool(refine_foreground)},
             info_extra={"sensitivity": float(sensitivity), "refine_foreground": bool(refine_foreground),
                         "runtime_env": FD_COMFY_RUNTIME_ENV},

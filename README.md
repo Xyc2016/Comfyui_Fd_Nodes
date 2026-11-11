@@ -25,21 +25,21 @@ URL 模式沿用现有 OSS 上传配置：`FD_OSS_BUCKET_NAME`、`FD_OSS_ENDPOIN
 
 `ZhiYiRMBGNode` / `ZhiYiRMBGNodeV2` 使用 Comfy 进程环境变量路由，不再提供 `env`、`service_url`、`service_url_preset` 或三个 `return_*` 节点输入。旧 API JSON 中残留的这些字段会被忽略；不会覆盖部署配置。
 
-| `FD_COMFY_RUNTIME_ENV` | 默认服务 | `image_encoding` 缺省值 |
+| `FD_COMFY_RUNTIME_ENV` | 默认服务 |
 |---|---|---|
-| `dev`（未设置时） | `http://10.1.0.230:8003/v1/rmbg` | `png` |
-| `domestic` | `http://model-api-dwpose-svc.online-server-gray:8001/v1/rmbg` | `png` |
-| `overseas` | `FD_OVERSEAS_GPU_GATEWAY` 下的 `/model-api-dwpose/v1/rmbg` | `jpeg_q95` |
+| `dev`（未设置时） | `http://10.1.0.230:8003/v1/rmbg` |
+| `domestic` | `http://model-api-dwpose-svc.online-server-gray:8001/v1/rmbg` |
+| `overseas` | `FD_OVERSEAS_GPU_GATEWAY` 下的 `/model-api-dwpose/v1/rmbg` |
 
-部署可用 `FD_RMBG_URL` 覆盖服务地址（包括生产依赖地址）；非法运行环境在加载配置时明确失败。修改部署变量需重启进程。国内集群与 102 保持无损 PNG，海外默认 JPEG Q95；节点末尾仍可用 `image_encoding=png/jpeg_q95` 手动指定，已保存的显式选择优先于缺省值。Q95 使用原尺寸 RGB、quality=95、4:2:0、optimize=true、非 progressive；有损压缩可能改变 mask 边界和背景残留。
+部署可用 `FD_RMBG_URL` 覆盖服务地址（包括生产依赖地址）；非法运行环境在加载配置时明确失败。修改部署变量需重启进程。RMBG 输入保持无损 PNG。
 
-- `refine_foreground=false`：只请求无损 8 位灰度 PNG mask，用压缩前原始 RGB 本地合成输出。Alpha 与旧回图解码一致：按软 mask 叠到黑底后输出三通道 RGB（含 8 位舍入），不再输出直通 RGBA；透明度仍通过独立 MASK 输出提供。Color 保持原背景色合成。
+- `refine_foreground=false`：请求成图和 mask；Alpha 与旧回图解码一致：按软 mask 叠到黑底后输出三通道 RGB（含 8 位舍入），不再输出直通 RGBA；透明度仍通过独立 MASK 输出提供。Color 保持原背景色合成。
 - `refine_foreground=true`：请求精修图片和 mask，使用服务端精修后的像素；Alpha 保留 RGBA，不用原图覆盖精修结果。服务端漏返图片时明确失败。
 - MASK_IMAGE 始终本地从 mask 生成，不传输重复预览。
 
-仅 mask 响应校验声明尺寸、原图尺寸、8 位灰度 PNG 编码与返回字段；推理尺寸 mask 按 BILINEAR 恢复原尺寸，异常明确失败。INFO 和调用日志记录编码、返回模式及实际服务地址，INFO 额外记录运行环境。
+INFO 和调用日志记录实际服务地址、返回参数与运行环境。
 
-保留 `image_delivery=base64/url` 及既有海外 URL 传输约束；Q95 URL 上传 `.jpg`，Base64 使用 `data:image/jpeg;base64,`，服务端响应仍为 PNG。不再读取旧 `FD_RMBG_REMOTE_OPTIMIZATION` / `FD_OVERSEAS_RMBG_MASK_ONLY`。衣物/时尚/身体分割及本地 RMBG 不受本次契约调整影响。
+保留 `image_delivery=base64/url` 及既有海外 URL 传输约束；URL 仍上传无损 PNG。不再读取旧 `FD_RMBG_REMOTE_OPTIMIZATION` / `FD_OVERSEAS_RMBG_MASK_ONLY`。衣物/时尚/身体分割及本地 RMBG 不受本次契约调整影响。
 
 > [!NOTE]
 > This projected was created with a [cookiecutter](https://github.com/Comfy-Org/cookiecutter-comfy-extension) template. It helps you start writing custom nodes without worrying about the Python setup.

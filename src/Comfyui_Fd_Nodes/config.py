@@ -148,7 +148,6 @@ RMBG_RUNTIME_URL = os.getenv("FD_RMBG_URL") or {
     "domestic": "http://model-api-dwpose-svc.online-server-gray:8001/v1/rmbg",
     "overseas": f"{FD_OVERSEAS_DWPOSE_URL}/v1/rmbg",
 }[FD_COMFY_RUNTIME_ENV]
-RMBG_DEFAULT_IMAGE_ENCODING = "jpeg_q95" if FD_COMFY_RUNTIME_ENV == "overseas" else "png"
 FD_CLOTHES_SEGMENT_URL = os.getenv("FD_CLOTHES_SEGMENT_URL", "http://10.1.0.230:8003/v1/segment/clothes")
 FD_FASHION_SEGMENT_URL = os.getenv("FD_FASHION_SEGMENT_URL", "http://10.1.0.230:8003/v1/segment/fashion")
 FD_BODY_SEGMENT_URL = os.getenv("FD_BODY_SEGMENT_URL", "http://10.1.0.230:8003/v1/segment/body")
