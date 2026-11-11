@@ -30,10 +30,18 @@ MAX_REQUEST_BODY_BYTES = 48_000
 JPEG_QUALITY_STEPS = (85, 75, 65, 55, 45, 35, 25)
 MIN_IMAGE_LONG_EDGE = 512
 IMAGE_RESIZE_FACTOR = 0.8
+IMAGE_TEXT_MODELS = ["qwen3.7-plus", "doubao-seed-2.0-mini"]
+
+
+def resolve_image_text_model(model: str | None) -> str:
+    selected = config.FD_IMAGE_TEXT_MODEL if model is None else model
+    if selected not in IMAGE_TEXT_MODELS:
+        raise ValueError(f"Unsupported image-to-text model: {selected}")
+    return selected
 
 
 class ZhiYiImageTextNode:
-    """知衣图生文节点，由专用环境变量选择 Qwen 或豆包。"""
+    """知衣图生文节点，节点选择优先，专用环境变量仅决定默认模型。"""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -70,6 +78,10 @@ class ZhiYiImageTextNode:
                     "step": 1,
                 }),
                 "image_delivery": (IMAGE_DELIVERY_OPTIONS, image_delivery_input_config()),
+                "model": (IMAGE_TEXT_MODELS, {
+                    "default": config.FD_IMAGE_TEXT_MODEL,
+                    "tooltip": "选择图生文模型；FD_IMAGE_TEXT_PROVIDER 仅设置默认值",
+                }),
             },
         }
 
@@ -209,15 +221,16 @@ class ZhiYiImageTextNode:
 
     def _build_request_payload(
         self, messages: list[dict[str, Any]], temperature: float, max_tokens: int,
+        model: str | None = None,
     ) -> dict[str, Any]:
         payload = {
             "stream": False,
-            "model": config.FD_IMAGE_TEXT_MODEL,
+            "model": resolve_image_text_model(model),
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
-        if config.FD_IMAGE_TEXT_PROVIDER == "qwen":
+        if payload["model"] == "qwen3.7-plus":
             payload["enable_thinking"] = False
         return payload
 
@@ -331,12 +344,14 @@ class ZhiYiImageTextNode:
         return (result.get("result_text") or "",)
 
     def generate(self, image, prompt, node_switch=1,
-                 system_prompt="", temperature=0.7, max_tokens=2048, image_delivery=None):
+                 system_prompt="", temperature=0.7, max_tokens=2048, image_delivery=None,
+                 model: str | None = None) -> tuple[str]:
         if node_switch == 1:
             return ("",)
 
         image_delivery = resolve_image_delivery(image_delivery)
-        if config.FD_IMAGE_TEXT_PROVIDER == "doubao" and FD_DOUBAO_VISION_URL:
+        model = resolve_image_text_model(model)
+        if model == "doubao-seed-2.0-mini" and FD_DOUBAO_VISION_URL:
             return self._generate_via_image_generation(image, prompt, system_prompt, image_delivery)
 
         cfg = load_config()
@@ -347,12 +362,12 @@ class ZhiYiImageTextNode:
 
         placeholder_messages = self._build_messages(prompt, [""], system_prompt)
         placeholder_payload = self._build_request_payload(
-            placeholder_messages, temperature, max_tokens
+            placeholder_messages, temperature, max_tokens, model
         )
         image_budget = self._image_budget(placeholder_payload, 1)
         data_url, image_info = self._prepare_image_reference(image, image_delivery, image_budget)
         messages = self._build_messages(prompt, [data_url], system_prompt)
-        payload = self._build_request_payload(messages, temperature, max_tokens)
+        payload = self._build_request_payload(messages, temperature, max_tokens, model)
         request_body, request_body_bytes = self._serialize_request_body(
             payload,
             allow_over_budget=image_info.get("compression_fallback", False),

@@ -29,7 +29,7 @@ FD_LITELLM_BASE_URL = os.getenv("FD_LITELLM_BASE_URL")
 FD_LITELLM_API_KEY = os.getenv("FD_LITELLM_API_KEY")
 FD_GPT_IMAGE_BACKEND = os.getenv("FD_GPT_IMAGE_BACKEND", "image_generation")
 
-# 三个图生文节点共用的独立模型开关，与运行环境、传图方式及服务地址无关。
+# 三个图生文节点共用的独立默认模型配置；节点显式 model 选项优先。
 FD_IMAGE_TEXT_PROVIDER = os.getenv("FD_IMAGE_TEXT_PROVIDER", "qwen")
 if FD_IMAGE_TEXT_PROVIDER not in ("qwen", "doubao"):
     raise ValueError("FD_IMAGE_TEXT_PROVIDER must be qwen or doubao")

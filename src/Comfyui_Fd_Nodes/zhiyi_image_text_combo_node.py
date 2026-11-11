@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import time
 import traceback
@@ -12,7 +14,9 @@ from .config_manager import load_config
 from .utils.error_utils import normalize_error_message
 from .utils.logging_utils import configure_default_logging
 from .utils.image_payload import IMAGE_DELIVERY_BASE64
-from .zhiyi_image_text_node import MAX_REQUEST_BODY_BYTES, ZhiYiImageTextNode
+from .zhiyi_image_text_node import (
+    IMAGE_TEXT_MODELS, MAX_REQUEST_BODY_BYTES, ZhiYiImageTextNode, resolve_image_text_model,
+)
 
 configure_default_logging()
 logger = logging.getLogger(__name__)
@@ -24,7 +28,7 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
     DEFAULT_PROMPT = "介绍这幅图片"
     MODEL = "qwen3.7-plus"
     DOUBAO_MODEL = "doubao-seed-2.0-mini"
-    MODELS = [MODEL, DOUBAO_MODEL]
+    MODELS = IMAGE_TEXT_MODELS
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -79,7 +83,7 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                 }),
                 "model": (cls.MODELS, {
                     "default": config.FD_IMAGE_TEXT_MODEL,
-                    "tooltip": "旧工作流兼容字段；实际模型由 FD_IMAGE_TEXT_PROVIDER 环境变量统一决定",
+                    "tooltip": "选择图生文模型；FD_IMAGE_TEXT_PROVIDER 仅设置默认值",
                 }),
             },
         }
@@ -340,13 +344,12 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
         combo_8=None,
         system_prompt="",
         image_delivery=None,
-        model: str = MODEL,
+        model: str | None = None,
     ) -> tuple[str, str]:
         if node_switch == 1:
             return ("", "node skipped")
 
-        # 接收旧工作流的 model 字段，但不允许它覆盖部署专用开关。
-        model = config.FD_IMAGE_TEXT_MODEL
+        model = resolve_image_text_model(model)
         # 保留旧 API 参数的接收能力，所有模型统一使用 base64。
         image_delivery = IMAGE_DELIVERY_BASE64
         cfg = load_config()
@@ -384,7 +387,7 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                     raise RuntimeError("无有效图片")
 
                 prompt = self._select_prompt(combo)
-                if config.FD_IMAGE_TEXT_PROVIDER == "doubao" and FD_DOUBAO_VISION_URL:
+                if model == self.DOUBAO_MODEL and FD_DOUBAO_VISION_URL:
                     image_refs = []
                     for image in expanded_images:
                         image_ref, image_info = self._prepare_image_reference(
@@ -421,7 +424,7 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                     prompt, [""] * len(expanded_images), system_prompt
                 )
                 placeholder_payload = self._build_request_payload(
-                    placeholder_messages, temperature, max_tokens
+                    placeholder_messages, temperature, max_tokens, model
                 )
                 image_budget = self._image_budget(
                     placeholder_payload, len(expanded_images)
@@ -437,7 +440,7 @@ class ZhiYiImageTextComboNode(ZhiYiImageTextNode):
                     image_infos.append(image_info)
 
                 messages = self._build_messages(prompt, data_urls, system_prompt)
-                payload = self._build_request_payload(messages, temperature, max_tokens)
+                payload = self._build_request_payload(messages, temperature, max_tokens, model)
                 request_body, request_body_bytes = self._serialize_request_body(
                     payload,
                     allow_over_budget=any(

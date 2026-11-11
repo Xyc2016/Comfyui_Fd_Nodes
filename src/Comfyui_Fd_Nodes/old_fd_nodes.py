@@ -8,7 +8,7 @@ import requests
 
 from . import config
 from .config_manager import load_config
-from .zhiyi_image_text_node import ZhiYiImageTextNode
+from .zhiyi_image_text_node import IMAGE_TEXT_MODELS, ZhiYiImageTextNode, resolve_image_text_model
 from .utils.common_util import bytes_calculate_hex_md5, pil2iobyte, tensor2pil
 from .config import (
     FD_DOUBAO_KEY,
@@ -122,7 +122,7 @@ class FD_BinaryDecisionNormalizer:
 
 
 class FD_imgToText_Doubao:
-    # 保留旧节点名和输入输出，由 FD_IMAGE_TEXT_PROVIDER 选择 Qwen 或豆包。
+    # 保留旧节点名和输入输出，专用环境变量只决定 model 的默认值。
     def __init__(self):
         pass
 
@@ -134,7 +134,13 @@ class FD_imgToText_Doubao:
                 # forceInput 让节点直接显示在连接处
                 "prompt": ("STRING", {"default": 'Describe the image below', "multiline": True}),
                 "defaultPrompt": ("STRING", {"default": '', "multiline": True}),
-            }
+            },
+            "optional": {
+                "model": (IMAGE_TEXT_MODELS, {
+                    "default": config.FD_IMAGE_TEXT_MODEL,
+                    "tooltip": "选择图生文模型；FD_IMAGE_TEXT_PROVIDER 仅设置默认值",
+                }),
+            },
         }
 
     RETURN_TYPES = ("STRING",)
@@ -143,15 +149,18 @@ class FD_imgToText_Doubao:
     OUTPUT_NODE = False
     CATEGORY = "image/captioning"
 
-    def gen(self, image_url: str, prompt: str, defaultPrompt: str) -> tuple[str]:
+    def gen(self, image_url: str, prompt: str, defaultPrompt: str,
+            model: str | None = None) -> tuple[str]:
         if is_url_delivery_required():
             require_http_image_url(image_url)
-        if config.FD_IMAGE_TEXT_PROVIDER == "qwen":
+        model = resolve_image_text_model(model)
+        print(f"FD_imgToText_Doubao request model={model}")
+        if model == "qwen3.7-plus":
             try:
                 cfg = load_config()
                 node = ZhiYiImageTextNode()
                 messages = node._build_messages(prompt, [image_url])
-                payload = node._build_request_payload(messages, 0.7, 2048)
+                payload = node._build_request_payload(messages, 0.7, 2048, model)
                 response = requests.post(
                     f"{cfg['base_url'].rstrip('/')}/v1/chat/completions",
                     headers={"Authorization": f"Bearer {cfg['api_key']}", "Content-Type": "application/json"},
@@ -162,6 +171,7 @@ class FD_imgToText_Doubao:
                 text = response.json()["choices"][0]["message"]["content"]
                 if isinstance(text, list):
                     text = "".join(part.get("text", "") for part in text if isinstance(part, dict))
+                print(f"FD_imgToText_Doubao response model={model} status={response.status_code}")
                 return (text,)
             except Exception as exc:
                 print(f"FD_imgToText_Doubao Qwen request failed: {exc}")

@@ -123,7 +123,7 @@ class BinaryDecisionNormalizerNodeTest(unittest.TestCase):
 
 class DoubaoNodeErrorBoundaryTest(unittest.TestCase):
     def setUp(self):
-        provider = patch("src.Comfyui_Fd_Nodes.config.FD_IMAGE_TEXT_PROVIDER", "doubao")
+        provider = patch("src.Comfyui_Fd_Nodes.config.FD_IMAGE_TEXT_MODEL", "doubao-seed-2.0-mini")
         provider.start()
         self.addCleanup(provider.stop)
         self.node = FD_imgToText_Doubao()

@@ -1,4 +1,4 @@
-"""Three public nodes use the dedicated provider, regardless of legacy model/address settings."""
+"""Explicit node choices win; the dedicated provider only supplies omitted defaults."""
 
 import json
 import os
@@ -35,16 +35,19 @@ def test_provider_startup_is_independent(provider: str | None, expected: str, ru
 
 @pytest.mark.parametrize("provider", ["qwen", "doubao"])
 @pytest.mark.parametrize("node_kind", ["legacy", "single", "combo"])
-@pytest.mark.parametrize("legacy_model", ["qwen3.7-plus", "doubao-seed-2.0-mini"])
-def test_all_nodes_obey_provider(
-    monkeypatch: pytest.MonkeyPatch, provider: str, node_kind: str, legacy_model: str,
+@pytest.mark.parametrize("selected_model", [None, "qwen3.7-plus", "doubao-seed-2.0-mini"])
+@pytest.mark.parametrize("vision_proxy", [False, True])
+def test_explicit_model_wins_and_omitted_model_uses_provider_default(
+    monkeypatch: pytest.MonkeyPatch, provider: str, node_kind: str, selected_model: str | None,
+    vision_proxy: bool,
 ) -> None:
-    model = "qwen3.7-plus" if provider == "qwen" else "doubao-seed-2.0-mini"
+    default_model = "qwen3.7-plus" if provider == "qwen" else "doubao-seed-2.0-mini"
+    model = selected_model or default_model
     monkeypatch.setattr(config, "FD_IMAGE_TEXT_PROVIDER", provider)
-    monkeypatch.setattr(config, "FD_IMAGE_TEXT_MODEL", model)
+    monkeypatch.setattr(config, "FD_IMAGE_TEXT_MODEL", default_model)
     monkeypatch.setattr(old_fd_nodes, "FD_DOUBAO_URL", "https://doubao.example.com/legacy")
     for module in (single, combo):
-        monkeypatch.setattr(module, "FD_DOUBAO_VISION_URL", "https://doubao.example.com/vision")
+        monkeypatch.setattr(module, "FD_DOUBAO_VISION_URL", "https://doubao.example.com/vision" if vision_proxy else "")
     for module in (single, combo, old_fd_nodes):
         monkeypatch.setattr(module, "load_config", lambda: {"base_url": "https://chat.example.com", "api_key": "test"})
     monkeypatch.delenv("FD_OVERSEAS_GPU_GATEWAY", raising=False)
@@ -70,26 +73,46 @@ def test_all_nodes_obey_provider(
 
     monkeypatch.setattr(requests, "post", post)
     image = torch.zeros((1, 16, 16, 3))
+    selection = {} if selected_model is None else {"model": selected_model}
     if node_kind == "legacy":
-        output = old_fd_nodes.FD_imgToText_Doubao().gen("https://cdn.example.com/a.png", "describe", "fallback")
+        output = old_fd_nodes.FD_imgToText_Doubao().gen(
+            "https://cdn.example.com/a.png", "describe", "fallback", **selection,
+        )
     elif node_kind == "single":
-        output = single.ZhiYiImageTextNode().generate(image, "describe", node_switch=0)
+        output = single.ZhiYiImageTextNode().generate(image, "describe", node_switch=0, **selection)
     else:
         output = combo.ZhiYiImageTextComboNode().generate(
-            combo_1={"images": [image], "prompt": "describe"}, retry_count=0, model=legacy_model,
+            combo_1={"images": [image], "prompt": "describe"}, retry_count=0, **selection,
         )
+        assert f"model={model}" in output[1]
     assert output[0] == "description"
     assert len(sent) == 1
     url, body = sent[0]
-    if provider == "qwen":
+    if model == "qwen3.7-plus" or (node_kind != "legacy" and not vision_proxy):
         assert url == "https://chat.example.com/v1/chat/completions"
-        assert body["model"] == model and body["enable_thinking"] is False
+        assert body["model"] == model
+        assert body.get("enable_thinking") is (False if model == "qwen3.7-plus" else None)
         assert body["messages"][-1]["content"][0]["text"] == "describe"
         if node_kind == "legacy":
             assert body["messages"][-1]["content"][1]["image_url"]["url"] == "https://cdn.example.com/a.png"
     else:
         assert url == f"https://doubao.example.com/{'legacy' if node_kind == 'legacy' else 'vision'}"
         assert body["text_prompt"] == "describe"
+
+
+@pytest.mark.parametrize("provider, model", [("qwen", "qwen3.7-plus"), ("doubao", "doubao-seed-2.0-mini")])
+@pytest.mark.parametrize("node_class", [old_fd_nodes.FD_imgToText_Doubao, single.ZhiYiImageTextNode,
+                                        combo.ZhiYiImageTextComboNode])
+def test_all_model_widgets_follow_default_and_preserve_previous_positions(
+    monkeypatch: pytest.MonkeyPatch, provider: str, model: str, node_class: type,
+) -> None:
+    monkeypatch.setattr(config, "FD_IMAGE_TEXT_PROVIDER", provider)
+    monkeypatch.setattr(config, "FD_IMAGE_TEXT_MODEL", model)
+    fields = node_class.INPUT_TYPES()
+    assert list(fields["optional"])[-1] == "model"
+    options, settings = fields["optional"]["model"]
+    assert options == ["qwen3.7-plus", "doubao-seed-2.0-mini"]
+    assert settings["default"] == model
 
 
 def test_qwen_legacy_failure_keeps_default_without_doubao_retry(monkeypatch: pytest.MonkeyPatch) -> None:
