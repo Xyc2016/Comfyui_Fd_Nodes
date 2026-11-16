@@ -231,6 +231,7 @@ def test_gpt_nodes_model_options_and_default(node_class):
     if node_class is FD_GPTImageComboNode:
         expected.insert(expected.index("gpt-image-2.5-sunburst-siphonlab") + 1,
                         "gpt-image-2.5-sunburst-for-pattern")
+        expected.extend(['gpt-image-2.6-flare-wdcloud', 'gpt-image-2.6-sunburst-wdcloud', 'gpt-image-2.6-flare', 'gpt-image-2.6-sunburst'])
     assert options == expected
     assert model_config["default"] == "gpt-image-2"
 

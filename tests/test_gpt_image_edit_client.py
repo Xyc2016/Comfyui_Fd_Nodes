@@ -54,6 +54,14 @@ class DummyResponse:
     ("gpt-image-2.6-flare-siphonlab", "litellm"),
     ("gpt-image-2.6-sunburst-siphonlab", "image_generation"),
     ("gpt-image-2.6-flare-siphonlab", "image_generation"),
+    ("gpt-image-2.6-flare-wdcloud", "litellm"),
+    ("gpt-image-2.6-flare-wdcloud", "image_generation"),
+    ("gpt-image-2.6-sunburst-wdcloud", "litellm"),
+    ("gpt-image-2.6-sunburst-wdcloud", "image_generation"),
+    ("gpt-image-2.6-flare", "litellm"),
+    ("gpt-image-2.6-flare", "image_generation"),
+    ("gpt-image-2.6-sunburst", "litellm"),
+    ("gpt-image-2.6-sunburst", "image_generation"),
 ])
 def test_image_generation_edit_uploads_posts_and_downloads(monkeypatch, model, backend, quality):
     calls = []

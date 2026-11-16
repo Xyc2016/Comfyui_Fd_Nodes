@@ -41,6 +41,10 @@ class GptImageEditClient:
         "gpt-image-2.5-vip",
         "gpt-image-2.6-sunburst-siphonlab",
         "gpt-image-2.6-flare-siphonlab",
+        "gpt-image-2.6-flare-wdcloud",
+        "gpt-image-2.6-sunburst-wdcloud",
+        "gpt-image-2.6-flare",
+        "gpt-image-2.6-sunburst",
     }
 
     def __init__(
