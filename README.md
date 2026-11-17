@@ -44,6 +44,18 @@ INFO 和调用日志记录实际服务地址、返回参数与运行环境。
 > [!NOTE]
 > This projected was created with a [cookiecutter](https://github.com/Comfy-Org/cookiecutter-comfy-extension) template. It helps you start writing custom nodes without worrying about the Python setup.
 
+## API 图生图测试节点的 GPT 2.6 max 模型
+
+`ZhiYiAiStudioImageComboNode` 支持自由填写 `gpt-image-2.6-flare-max-wdcloud` 和
+`gpt-image-2.6-sunburst-max-wdcloud`。`api_type=auto` 或 `gpt_image` 时，使用节点
+`target_url` / `api_key`（为空时沿用环境配置）直连 LiteLLM 兼容的 `/v1/images/edits`，
+不经过 IG。模型名称完整透传，`quality` 独立按节点输入传递；响应支持 URL 与 base64 图片。
+
+这两个模型采用同模型两轮重叠重试：首轮等待 200 秒未完成时启动第二轮，总预算 400 秒；
+可重试错误提前启动第二轮，先成功者返回。不切换模型或渠道，不做 NSFW 兜底；安全拒绝、
+鉴权失败及其它不可重试的 4xx 直接报错。已发送的在途请求不能撤销，但不会阻塞成功结果返回。
+其他模型保持原有调用方式。
+
 ## Quickstart
 
 1. Install [ComfyUI](https://docs.comfy.org/get_started).

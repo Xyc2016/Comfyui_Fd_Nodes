@@ -21,6 +21,7 @@ from .config import (
 from .utils.common_util import downscale_image_tensor
 from .utils.error_utils import ERROR_TIMEOUT, normalize_error_message
 from .utils.gpt_image_request import GptImageRequestMixin
+from .utils.gpt_image_max import MAX_MODELS, call_with_same_model_overlap, request_max_image_edit
 from .utils.gpt_image_size import resolution_to_edit_size, resolve_gpt_image_size
 from .utils.litellm_gemini_image import (
     build_litellm_messages,
@@ -401,6 +402,18 @@ class ZhiYiAiStudioImageComboNode(GptImageRequestMixin):
         logger.info("Calling ZhiYi AiStudio GPT Image API with payload=%s", log_payload)
 
         try:
+            if normalized_model in MAX_MODELS:
+                def call_max(timeout: float) -> tuple[BytesIO, str, str]:
+                    return request_max_image_edit(
+                        base_url=base_url,
+                        api_key=api_key,
+                        data=data,
+                        multipart_files=multipart_files,
+                        timeout=timeout,
+                    )
+
+                image_bytesio, _, result_url = call_with_same_model_overlap(call_max)
+                return _bytesio_to_image_tensor(image_bytesio), None, result_url
             image_bytesio, _, result_url = self._request_gpt_image_edit(
                 base_url=base_url,
                 api_key=api_key,
