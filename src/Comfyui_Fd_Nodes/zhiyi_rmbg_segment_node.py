@@ -495,15 +495,7 @@ class _RmbgSegmentApiBase:
         else:
             mask = self._empty_mask_tensor(original_image.size)
 
-        if payload_params["extra"].get("refine_foreground") and payload_params["is_rmbg"]:
-            # The refined foreground RGB cannot be reconstructed from the source + mask.
-            processed_image = self._decode_png_data_url(result.get("processed_image"), "processed_image")
-            if processed_image.size != original_image.size:
-                processed_image = processed_image.resize(original_image.size, Image.Resampling.BILINEAR)
-            mode = "RGBA" if payload_params["background"] == "Alpha" else "RGB"
-            pixels = np.asarray(processed_image.convert(mode), dtype=np.float32) / 255.0
-            result_image = torch.from_numpy(pixels.copy()).unsqueeze(0)
-        elif result.get("mask"):
+        if result.get("mask"):
             result_image = self._compose_output_image(
                 image_tensor,
                 mask,

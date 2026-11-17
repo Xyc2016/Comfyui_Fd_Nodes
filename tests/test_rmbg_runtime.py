@@ -1,4 +1,4 @@
-"""Deployment routing, legacy graph isolation and refined pixel preservation."""
+"""Deployment routing, legacy graph isolation and production-compatible output."""
 
 import base64
 import io
@@ -69,7 +69,12 @@ def test_invalid_runtime_fails_on_load() -> None:
 
 @pytest.mark.parametrize("node_cls", [module.ZhiYiRMBGNode, ZhiYiRMBGNodeV2])
 @pytest.mark.parametrize("background", ["Alpha", "Color"])
-def test_refine_preserves_server_pixels(monkeypatch, node_cls: type, background: str) -> None:
+@pytest.mark.parametrize("refine_foreground", [False, True])
+@pytest.mark.parametrize("server_image_present", [False, True])
+def test_mask_output_matches_production(
+    monkeypatch: pytest.MonkeyPatch, node_cls: type, background: str,
+    refine_foreground: bool, server_image_present: bool,
+) -> None:
     node = node_cls()
     mode = "RGBA" if background == "Alpha" else "RGB"
     color = (37, 111, 207, 128) if mode == "RGBA" else (37, 111, 207)
@@ -77,26 +82,27 @@ def test_refine_preserves_server_pixels(monkeypatch, node_cls: type, background:
     buffer = io.BytesIO()
     refined.save(buffer, format="PNG")
     response = _mask_response()
-    response["processed_image"] = base64.b64encode(buffer.getvalue()).decode()
+    if server_image_present:
+        response["processed_image"] = base64.b64encode(buffer.getvalue()).decode()
 
     def post(url: str, payload: dict, timeout: int, label: str) -> dict:
         assert (payload["return_image"], payload["return_mask"], payload["return_mask_image"]) == (True, True, False)
-        assert payload["refine_foreground"] is True
+        assert payload["refine_foreground"] is refine_foreground
         return response
 
     monkeypatch.setattr(node, "_post_process", post)
-    image = torch.zeros(1, 3, 5, 3)
-    output, mask, preview, text = _call_node(node, image, refine_foreground=True, background=background,
+    source = np.full((3, 5, 3), (51, 102, 153), dtype=np.uint8).astype(np.float32) / 255
+    image = torch.from_numpy(source.copy()).unsqueeze(0)
+    output, mask, preview, text = _call_node(node, image, refine_foreground=refine_foreground, background=background,
                                           return_image=False, return_mask=False)
-    assert torch.equal(output, torch.from_numpy(np.asarray(refined).copy().astype(np.float32) / 255).unsqueeze(0))
+    alpha = np.linspace(0, 255, 15, dtype=np.uint8).reshape(3, 5).astype(np.float32) / 255
+    if background == "Alpha":
+        expected = np.concatenate((source * (alpha[..., None] > 0), alpha[..., None]), axis=-1)
+    else:
+        expected = source * alpha[..., None] + np.float32(34 / 255) * (1 - alpha[..., None])
+    assert torch.equal(output, torch.from_numpy(expected).unsqueeze(0))
+    assert torch.equal(mask, torch.from_numpy(alpha).unsqueeze(0))
     assert torch.equal(preview, mask.unsqueeze(-1).expand(-1, -1, -1, 3))
-
-
-def test_refine_missing_image_fails(monkeypatch) -> None:
-    node = ZhiYiRMBGNodeV2()
-    monkeypatch.setattr(node, "_post_process", lambda *args: _mask_response())
-    with pytest.raises(RuntimeError, match="processed_image"):
-        _call_node(node, torch.zeros(1, 3, 5, 3), refine_foreground=True)
 
 
 @pytest.mark.parametrize("node_cls", [module.ZhiYiRMBGNode, ZhiYiRMBGNodeV2])

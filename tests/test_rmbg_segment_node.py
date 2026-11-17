@@ -327,8 +327,9 @@ def test_rmbg_posts_full_payload_and_decodes_outputs(monkeypatch):
     assert result_image.shape == (1, 2, 2, 3)
     assert mask.shape == (1, 2, 2)
     assert mask_image.shape == (1, 2, 2, 3)
-    # Preserve the refined server RGB; only the preview is generated locally.
-    assert torch.equal(result_image[0, 0, 0], torch.tensor([0.0, 1.0, 0.0]))
+    # Match production: compose the original black image over white using the mask.
+    assert torch.equal(result_image[0, 0, 0], torch.tensor([0.0, 0.0, 0.0]))
+    assert torch.equal(result_image[0, 0, 1], torch.tensor([1.0, 1.0, 1.0]))
     assert torch.equal(mask, torch.tensor([[[1.0, 0.0], [0.0, 1.0]]]))
     assert torch.equal(mask_image[0, 0, 0], torch.tensor([1.0, 1.0, 1.0]))
     assert info["service_url"] == "http://example.com:8003/v1/rmbg"

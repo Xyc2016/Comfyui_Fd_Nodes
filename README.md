@@ -33,8 +33,8 @@ URL 模式沿用现有 OSS 上传配置：`FD_OSS_BUCKET_NAME`、`FD_OSS_ENDPOIN
 
 部署可用 `FD_RMBG_URL` 覆盖服务地址（包括生产依赖地址）；非法运行环境在加载配置时明确失败。修改部署变量需重启进程。RMBG 输入保持无损 PNG。
 
-- `refine_foreground=false`：请求成图和 mask；Alpha 与旧回图解码一致：按软 mask 叠到黑底后输出三通道 RGB（含 8 位舍入），不再输出直通 RGBA；透明度仍通过独立 MASK 输出提供。Color 保持原背景色合成。
-- `refine_foreground=true`：请求精修图片和 mask，使用服务端精修后的像素；Alpha 保留 RGBA，不用原图覆盖精修结果。服务端漏返图片时明确失败。
+- `refine_foreground` 仍传给服务端；V1/V2 的输出恢复生产 53.8.65 的 mask 优先逻辑：收到 mask 后，始终用原图和 mask 本地合成，不采用服务端 `processed_image`，即使开启精修也一样。
+- Alpha 输出直通 RGBA，alpha 来自 mask，全透明像素的 RGB 置零；Color 用原图、mask 和指定背景色合成 RGB。独立 MASK 输出保持不变。服务端缺少 mask 仍明确失败；有 mask 时不要求返回 `processed_image`。
 - MASK_IMAGE 始终本地从 mask 生成，不传输重复预览。
 
 INFO 和调用日志记录实际服务地址、返回参数与运行环境。
